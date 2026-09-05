@@ -1,0 +1,41 @@
+:root {
+  --bg: #f4f2ee;
+  --surface: #ffffff;
+  --border: #e6e2d9;
+  --border-strong: #d2ccbf;
+
+  --ink: #201e1a;
+  --ink-soft: #736c60;
+  --ink-faint: #a89f8f;
+
+  --accent: #2f4538;
+  --accent-strong: #1f2f26;
+  --accent-tint: #e6ede6;
+
+  --status-confirmee: #2f6b45;
+  --status-confirmee-bg: #e3f0e5;
+  --status-attente: #a3701f;
+  --status-attente-bg: #faefd9;
+  --status-annulee: #a34430;
+  --status-annulee-bg: #f7e6e0;
+
+  --font-display: 'Fraunces', Georgia, serif;
+  --font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'IBM Plex Mono', 'SFMono-Regular', monospace;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+
+  --radius: 8px;
+  --radius-lg: 12px;
+  --radius-pill: 999px;
+
+  --shadow-card: 0 1px 2px rgba(32, 30, 26, 0.04), 0 8px 24px -16px rgba(32, 30, 26, 0.12);
+  --shadow-modal: 0 24px 64px -24px rgba(32, 30, 26, 0.35);
+}

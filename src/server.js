@@ -1,0 +1,33 @@
+require('dotenv').config();
+const express = require('express');
+const cors = require('cors');
+const { connectDB } = require('./config/db');
+const reservationsRouter = require('./routes/reservations.routes');
+const { errorHandler } = require('./middleware/errorHandler');
+
+const app = express();
+
+app.use(cors());
+app.use(express.json());
+
+app.get('/health', (req, res) => res.json({ status: 'ok' }));
+app.use('/api/reservations', reservationsRouter);
+
+// 404 explicite plutôt qu'un HTML par défaut d'Express — plus propre pour une API.
+app.use((req, res) => res.status(404).json({ error: 'route_introuvable' }));
+
+app.use(errorHandler);
+
+const PORT = process.env.PORT || 4000;
+
+async function start() {
+  await connectDB();
+  app.listen(PORT, () => {
+    console.log(`[server] API réservations en écoute sur le port ${PORT}`);
+  });
+}
+
+start().catch((err) => {
+  console.error('[server] échec du démarrage:', err.message);
+  process.exit(1);
+});

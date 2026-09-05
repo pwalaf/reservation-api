@@ -1,0 +1,19 @@
+{
+  "name": "reservation-api",
+  "version": "1.0.0",
+  "description": "API de gestion de réservations pour petites structures d'hébergement (hôtels, gîtes)",
+  "main": "src/server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "seed": "node seed.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "mongoose": "^8.5.1",
+    "zod": "^3.25.76"
+  }
+}

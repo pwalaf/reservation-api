@@ -1,0 +1,586 @@
+]633;E;for f in package.json README.md seed.js test-api.sh src/server.js src/config/db.js src/models/Reservation.js src/validators/reservation.validator.js src/controllers/reservations.controller.js src/controllers/reservations.stats.js src/routes/reservations.routes.js src/middleware/asyncHandler.js src/middleware/errorHandler.js;1c314a5a-46dc-44ae-a684-436236b06a10]633;C// ==== package.json (19 lignes) ====
+{
+  "name": "reservation-api",
+  "version": "1.0.0",
+  "description": "API de gestion de réservations pour petites structures d'hébergement (hôtels, gîtes)",
+  "main": "src/server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "seed": "node seed.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "mongoose": "^8.5.1",
+    "zod": "^3.25.76"
+  }
+}
+
+// ==== README.md (83 lignes) ====
+# Reservation API
+
+API de gestion de réservations pour petites structures d'hébergement
+(hôtels, gîtes) — CRUD complet + statistiques via agrégation MongoDB.
+
+Pensée pour être montrée en 2 minutes : une seule collection, un pipeline
+d'agrégation qui répond à une vraie question métier (revenu, occupation,
+chambre la plus demandée).
+
+## Installation
+
+```bash
+npm install
+cp .env.example .env
+# renseigner MONGODB_URI dans .env (un cluster Atlas gratuit suffit)
+npm run seed   # peuple la base avec des données de démo
+npm run dev    # démarre le serveur avec rechargement automatique
+```
+
+## Endpoints
+
+| Méthode | Route                     | Description                              |
+|---------|---------------------------|-------------------------------------------|
+| GET     | /api/reservations         | Liste (filtres `?status=` et `?roomType=`)|
+| GET     | /api/reservations/stats   | Revenu/mois, occupation par type, top room|
+| GET     | /api/reservations/:id     | Détail d'une réservation                  |
+| POST    | /api/reservations         | Créer une réservation                     |
+| PATCH   | /api/reservations/:id     | Modifier (ex: changer le statut)          |
+| DELETE  | /api/reservations/:id     | Supprimer                                 |
+
+## Démo rapide (curl)
+
+```bash
+# Créer une réservation
+curl -X POST http://localhost:4000/api/reservations \
+  -H "Content-Type: application/json" \
+  -d '{
+    "clientName": "Rina Randria",
+    "roomType": "double",
+    "checkIn": "2026-09-01",
+    "checkOut": "2026-09-03",
+    "status": "confirmee",
+    "amount": 130000
+  }'
+
+# Lister les réservations confirmées
+curl "http://localhost:4000/api/reservations?status=confirmee"
+
+# Statistiques (revenu par mois, occupation par type de chambre)
+curl http://localhost:4000/api/reservations/stats
+```
+
+## Interface (client/)
+
+Un client React minimal pour piloter l'API : statistiques en tête de page,
+filtres par statut, création de réservation, changement de statut et
+suppression en ligne. Pas de bibliothèque UI — CSS sur-mesure avec des
+tokens de design (couleurs, typographie, espacements) définis dans
+`client/src/styles/tokens.css`.
+
+```bash
+cd client
+npm install
+npm run dev   # http://localhost:5173, l'API doit tourner sur le port 4000
+```
+
+## Ce que ce mini-projet démontre
+
+- Schéma Mongoose avec validation au niveau du modèle (règle métier :
+  `checkOut` après `checkIn`) en plus de la validation HTTP.
+- Validation stricte des entrées avec Zod, erreurs renvoyées en JSON structuré.
+- Gestion d'erreurs centralisée (`errorHandler.js`) plutôt que des
+  try/catch dupliqués dans chaque route.
+- Pipeline d'agrégation MongoDB (`$facet`, `$group`, `$match`) qui répond
+  en un seul aller-retour base de données à trois questions métier réelles.
+- Index composé (`status`, `checkIn`) pour les requêtes filtrées les plus
+  fréquentes.
+
+## Pour aller plus loin (hors scope de cette version rapide)
+
+- Authentification (un gérant par structure)
+- Pagination sur `GET /api/reservations`
+- Notifications (email/SMS) de confirmation
+
+// ==== seed.js (46 lignes) ====
+// Peuple la base avec des données réalistes pour la démo/vidéo : plusieurs
+// mois, plusieurs types de chambre, quelques réservations annulées pour que
+// les filtres et l'agrégation aient un vrai résultat à montrer. Chaque
+// réservation reçoit un historique de statuts cohérent (création puis,
+// selon le cas, confirmation ou annulation quelques heures plus tard) pour
+// que le calcul de délai moyen de confirmation ait des données à agréger.
+require('dotenv').config();
+const mongoose = require('mongoose');
+const { connectDB } = require('./src/config/db');
+const { Reservation } = require('./src/models/Reservation');
+
+function withHistory(entry, hoursToResolve) {
+  const created = new Date(entry.checkIn);
+  created.setDate(created.getDate() - 20); // réservation faite ~20 jours avant l'arrivée
+  const history = [{ status: 'en_attente', changedAt: created }];
+
+  if (entry.status !== 'en_attente') {
+    const resolved = new Date(created.getTime() + hoursToResolve * 60 * 60 * 1000);
+    history.push({ status: entry.status, changedAt: resolved });
+  }
+
+  return { ...entry, statusHistory: history };
+}
+
+const sample = [
+  withHistory({ clientName: 'Rakoto Andry', roomType: 'double', checkIn: '2026-06-03', checkOut: '2026-06-05', status: 'confirmee', amount: 120000 }, 4),
+  withHistory({ clientName: 'Hery Rasoanaivo', roomType: 'suite', checkIn: '2026-06-10', checkOut: '2026-06-13', status: 'confirmee', amount: 340000 }, 12),
+  withHistory({ clientName: 'Nirina Rabe', roomType: 'simple', checkIn: '2026-06-15', checkOut: '2026-06-16', status: 'annulee', amount: 45000 }, 30),
+  withHistory({ clientName: 'Voahangy Randria', roomType: 'dortoir', checkIn: '2026-06-20', checkOut: '2026-06-22', status: 'confirmee', amount: 60000 }, 2),
+  withHistory({ clientName: 'Jean-Claude Ravelo', roomType: 'double', checkIn: '2026-07-02', checkOut: '2026-07-04', status: 'confirmee', amount: 130000 }, 8),
+  withHistory({ clientName: 'Soa Andrianina', roomType: 'suite', checkIn: '2026-07-08', checkOut: '2026-07-11', status: 'en_attente', amount: 350000 }, 0),
+  withHistory({ clientName: 'Fanja Rakotomalala', roomType: 'simple', checkIn: '2026-07-14', checkOut: '2026-07-15', status: 'confirmee', amount: 48000 }, 1),
+  withHistory({ clientName: 'Tojo Andriamahefa', roomType: 'double', checkIn: '2026-07-20', checkOut: '2026-07-23', status: 'confirmee', amount: 195000 }, 6),
+];
+
+async function run() {
+  await connectDB();
+  await Reservation.deleteMany({});
+  await Reservation.insertMany(sample);
+  console.log(`[seed] ${sample.length} réservations insérées`);
+  await mongoose.disconnect();
+}
+
+run().catch((err) => {
+  console.error('[seed] échec:', err.message);
+  process.exit(1);
+});
+// ==== test-api.sh (91 lignes) ====
+#!/usr/bin/env bash
+# Script de test end-to-end pour l'API de réservations.
+# Prérequis : le serveur tourne (npm run dev) et la base a été seedée (npm run seed).
+set -uo pipefail
+
+BASE_URL="http://localhost:4000"
+API="$BASE_URL/api/reservations"
+
+separator() { printf '\n\033[1m== %s ==\033[0m\n' "$1"; }
+
+# Extrait un champ JSON depuis stdin sans dépendance externe (jq peut manquer).
+json_field() {
+  node -e "
+    let d = '';
+    process.stdin.on('data', c => d += c).on('end', () => {
+      try { console.log(JSON.parse(d)$1 ?? ''); } catch { console.log(''); }
+    });
+  "
+}
+
+separator "Health check"
+curl -s -w '\n[HTTP %{http_code}]\n' "$BASE_URL/health"
+
+separator "Création — réservation valide"
+CREATE_BODY='{
+  "clientName": "Test Script",
+  "clientPhone": "034 00 000 00",
+  "roomType": "double",
+  "checkIn": "2026-10-01",
+  "checkOut": "2026-10-03",
+  "status": "confirmee",
+  "amount": 150000
+}'
+CREATE_RESPONSE=$(curl -s -X POST "$API" -H "Content-Type: application/json" -d "$CREATE_BODY")
+echo "$CREATE_RESPONSE"
+ID=$(echo "$CREATE_RESPONSE" | json_field "._id")
+if [ -z "$ID" ]; then
+  echo "⚠️  Échec de création — arrêt du script (vérifie que le serveur tourne et que MONGODB_URI est correct)"
+  exit 1
+fi
+echo "→ id créé: $ID"
+
+separator "Validation — checkOut avant checkIn (doit être 400)"
+curl -s -w '\n[HTTP %{http_code}]\n' -X POST "$API" -H "Content-Type: application/json" -d '{
+  "clientName": "Cas invalide",
+  "roomType": "double",
+  "checkIn": "2026-10-05",
+  "checkOut": "2026-10-01",
+  "amount": 50000
+}'
+
+separator "Validation — champ obligatoire manquant (doit être 400)"
+curl -s -w '\n[HTTP %{http_code}]\n' -X POST "$API" -H "Content-Type: application/json" -d '{
+  "roomType": "double",
+  "checkIn": "2026-10-01",
+  "checkOut": "2026-10-03",
+  "amount": 50000
+}'
+
+separator "Liste complète"
+curl -s -w '\n[HTTP %{http_code}]\n' "$API"
+
+separator "Liste filtrée — status=confirmee"
+curl -s -w '\n[HTTP %{http_code}]\n' "$API?status=confirmee"
+
+separator "Liste filtrée — roomType=suite"
+curl -s -w '\n[HTTP %{http_code}]\n' "$API?roomType=suite"
+
+separator "Détail par id"
+curl -s -w '\n[HTTP %{http_code}]\n' "$API/$ID"
+
+separator "Détail — id invalide (doit être 400)"
+curl -s -w '\n[HTTP %{http_code}]\n' "$API/ceci-n-est-pas-un-id"
+
+separator "Détail — id inexistant mais bien formé (doit être 404)"
+curl -s -w '\n[HTTP %{http_code}]\n' "$API/000000000000000000000000"
+
+separator "Update — changement de statut uniquement"
+curl -s -w '\n[HTTP %{http_code}]\n' -X PATCH "$API/$ID" -H "Content-Type: application/json" -d '{"status": "annulee"}'
+
+separator "Stats — revenu/mois, occupation par type, chambre la plus demandée"
+curl -s -w '\n[HTTP %{http_code}]\n' "$API/stats"
+
+separator "Suppression"
+curl -s -w '\n[HTTP %{http_code}]\n' -X DELETE "$API/$ID"
+
+separator "Get après suppression (doit être 404)"
+curl -s -w '\n[HTTP %{http_code}]\n' "$API/$ID"
+
+separator "Terminé"
+echo "Vérifie ci-dessus : les codes 400/404 attendus sont bien ceux marqués comme tels dans les titres."
+
+// ==== src/server.js (33 lignes) ====
+require('dotenv').config();
+const express = require('express');
+const cors = require('cors');
+const { connectDB } = require('./config/db');
+const reservationsRouter = require('./routes/reservations.routes');
+const { errorHandler } = require('./middleware/errorHandler');
+
+const app = express();
+
+app.use(cors());
+app.use(express.json());
+
+app.get('/health', (req, res) => res.json({ status: 'ok' }));
+app.use('/api/reservations', reservationsRouter);
+
+// 404 explicite plutôt qu'un HTML par défaut d'Express — plus propre pour une API.
+app.use((req, res) => res.status(404).json({ error: 'route_introuvable' }));
+
+app.use(errorHandler);
+
+const PORT = process.env.PORT || 4000;
+
+async function start() {
+  await connectDB();
+  app.listen(PORT, () => {
+    console.log(`[server] API réservations en écoute sur le port ${PORT}`);
+  });
+}
+
+start().catch((err) => {
+  console.error('[server] échec du démarrage:', err.message);
+  process.exit(1);
+});
+
+// ==== src/config/db.js (20 lignes) ====
+const mongoose = require('mongoose');
+
+async function connectDB() {
+  const uri = process.env.MONGODB_URI;
+  if (!uri) {
+    throw new Error('MONGODB_URI manquant dans .env');
+  }
+
+  mongoose.connection.on('connected', () => {
+    console.log('[db] connecté à MongoDB');
+  });
+
+  mongoose.connection.on('error', (err) => {
+    console.error('[db] erreur de connexion:', err.message);
+  });
+
+  await mongoose.connect(uri);
+}
+
+module.exports = { connectDB };
+
+// ==== src/models/Reservation.js (51 lignes) ====
+const mongoose = require('mongoose');
+
+const ROOM_TYPES = ['simple', 'double', 'suite', 'dortoir'];
+const STATUSES = ['en_attente', 'confirmee', 'annulee'];
+
+const statusHistoryEntrySchema = new mongoose.Schema(
+  {
+    status: { type: String, enum: STATUSES, required: true },
+    changedAt: { type: Date, default: Date.now },
+  },
+  { _id: false }
+);
+
+const reservationSchema = new mongoose.Schema(
+  {
+    clientName: { type: String, required: true, trim: true },
+    clientPhone: { type: String, trim: true },
+    roomType: { type: String, enum: ROOM_TYPES, required: true },
+    checkIn: { type: Date, required: true },
+    checkOut: { type: Date, required: true },
+    status: { type: String, enum: STATUSES, default: 'en_attente' },
+    // Historique embarqué plutôt qu'une collection séparée jointe par _id :
+    // on relit toujours l'historique avec la réservation elle-même, jamais
+    // seul — c'est exactement le cas d'usage où le modèle document de
+    // MongoDB évite une jointure pour rien.
+    statusHistory: {
+      type: [statusHistoryEntrySchema],
+      default: () => [{ status: 'en_attente', changedAt: new Date() }],
+    },
+    amount: { type: Number, required: true, min: 0 },
+    notes: { type: String, trim: true },
+  },
+  { timestamps: true }
+);
+
+// checkOut doit toujours être après checkIn — évite les données incohérentes
+// dès l'écriture, indépendamment de la couche de validation HTTP.
+reservationSchema.pre('validate', function guardDateRange(next) {
+  if (this.checkIn && this.checkOut && this.checkOut <= this.checkIn) {
+    next(new Error('checkOut doit être postérieur à checkIn'));
+    return;
+  }
+  next();
+});
+
+reservationSchema.index({ status: 1, checkIn: 1 });
+
+module.exports = {
+  Reservation: mongoose.model('Reservation', reservationSchema),
+  ROOM_TYPES,
+  STATUSES,
+};
+// ==== src/validators/reservation.validator.js (35 lignes) ====
+const { z } = require('zod');
+const { ROOM_TYPES, STATUSES } = require('../models/Reservation');
+
+// Schéma de base (ZodObject) gardé séparé du .refine() : .refine() renvoie
+// un ZodEffects qui n'a plus .partial(), donc on part de l'objet brut pour
+// pouvoir dériver aussi bien la version stricte (create) que partielle (update).
+const baseReservationSchema = z.object({
+  clientName: z.string().min(2, 'Le nom du client est trop court'),
+  clientPhone: z.string().optional(),
+  roomType: z.enum(ROOM_TYPES),
+  checkIn: z.coerce.date(),
+  checkOut: z.coerce.date(),
+  status: z.enum(STATUSES).optional(),
+  amount: z.number().nonnegative('Le montant ne peut pas être négatif'),
+  notes: z.string().optional(),
+});
+
+const checkOutAfterCheckIn = (data, ctx) => {
+  if (data.checkIn && data.checkOut && data.checkOut <= data.checkIn) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'checkOut doit être postérieur à checkIn',
+      path: ['checkOut'],
+    });
+  }
+};
+
+const createReservationSchema = baseReservationSchema.superRefine(checkOutAfterCheckIn);
+
+// Sur une mise à jour, on n'exige pas tous les champs — le client peut
+// vouloir ne changer que le statut. La règle checkOut > checkIn ne s'applique
+// que si les deux dates sont présentes dans le payload envoyé.
+const updateReservationSchema = baseReservationSchema.partial().superRefine(checkOutAfterCheckIn);
+
+module.exports = { createReservationSchema, updateReservationSchema };
+
+// ==== src/controllers/reservations.controller.js (129 lignes) ====
+const { Reservation } = require('../models/Reservation');
+const {
+  createReservationSchema,
+  updateReservationSchema,
+} = require('../validators/reservation.validator');
+const { asyncHandler } = require('../middleware/asyncHandler');
+const { ApiError } = require('../middleware/errorHandler');
+
+const list = asyncHandler(async (req, res) => {
+  const { status, roomType } = req.query;
+  const filter = {};
+  if (status) filter.status = status;
+  if (roomType) filter.roomType = roomType;
+
+  const reservations = await Reservation.find(filter).sort({ checkIn: 1 });
+  res.json(reservations);
+});
+
+const getById = asyncHandler(async (req, res) => {
+  const reservation = await Reservation.findById(req.params.id);
+  if (!reservation) throw new ApiError(404, 'reservation_introuvable');
+  res.json(reservation);
+});
+
+const create = asyncHandler(async (req, res) => {
+  const payload = createReservationSchema.parse(req.body);
+  const reservation = await Reservation.create(payload);
+  res.status(201).json(reservation);
+});
+
+const update = asyncHandler(async (req, res) => {
+  const payload = updateReservationSchema.parse(req.body);
+  const { status, ...rest } = payload;
+
+  const updateOps = { $set: rest };
+  // $push l'entrée d'historique dans le même document, dans la même écriture
+  // que la mise à jour du champ status : pas de second aller-retour, pas de
+  // risque d'incohérence entre le statut courant et son historique.
+  if (status) {
+    updateOps.$set.status = status;
+    updateOps.$push = { statusHistory: { status, changedAt: new Date() } };
+  }
+
+  const reservation = await Reservation.findByIdAndUpdate(req.params.id, updateOps, {
+    new: true,
+    runValidators: true,
+  });
+  if (!reservation) throw new ApiError(404, 'reservation_introuvable');
+  res.json(reservation);
+});
+
+const remove = asyncHandler(async (req, res) => {
+  const reservation = await Reservation.findByIdAndDelete(req.params.id);
+  if (!reservation) throw new ApiError(404, 'reservation_introuvable');
+  res.status(204).send();
+});
+
+// Le cœur de la démonstration MongoDB : un seul aller-retour base de données
+// (via $facet) pour produire trois métriques utiles à un gérant d'hébergement :
+// revenu confirmé par mois, occupation par type de chambre, et la chambre la
+// plus demandée.
+const stats = asyncHandler(async (req, res) => {
+  const [result] = await Reservation.aggregate([
+    {
+      $facet: {
+        revenuParMois: [
+          { $match: { status: 'confirmee' } },
+          {
+            $group: {
+              _id: { annee: { $year: '$checkIn' }, mois: { $month: '$checkIn' } },
+              revenu: { $sum: '$amount' },
+              nombreReservations: { $sum: 1 },
+            },
+          },
+          { $sort: { '_id.annee': 1, '_id.mois': 1 } },
+        ],
+        occupationParTypeChambre: [
+          { $match: { status: { $in: ['confirmee', 'en_attente'] } } },
+          {
+            $group: {
+              _id: '$roomType',
+              nombreReservations: { $sum: 1 },
+              revenuTotal: { $sum: '$amount' },
+            },
+          },
+          { $sort: { nombreReservations: -1 } },
+        ],
+        // Délai moyen entre la création et la confirmation, calculé en
+        // dépliant le tableau statusHistory embarqué (un $unwind par entrée)
+        // puis en comparant l'horodatage "en_attente" au premier
+        // "confirmee" du même document. Impossible sans jointure explicite
+        // si l'historique vivait dans une table séparée.
+        delaiMoyenConfirmationHeures: [
+          { $match: { status: 'confirmee' } },
+          { $unwind: '$statusHistory' },
+          {
+            $group: {
+              _id: '$_id',
+              creation: { $min: '$statusHistory.changedAt' },
+              confirmation: {
+                $min: {
+                  $cond: [{ $eq: ['$statusHistory.status', 'confirmee'] }, '$statusHistory.changedAt', null],
+                },
+              },
+            },
+          },
+          { $match: { confirmation: { $ne: null } } },
+          {
+            $project: {
+              heures: { $divide: [{ $subtract: ['$confirmation', '$creation'] }, 1000 * 60 * 60] },
+            },
+          },
+          { $group: { _id: null, moyenne: { $avg: '$heures' } } },
+        ],
+      },
+    },
+  ]);
+
+  const chambrePlusDemandee = result.occupationParTypeChambre[0]?._id ?? null;
+  const delaiMoyenConfirmationHeures = result.delaiMoyenConfirmationHeures[0]?.moyenne ?? null;
+
+  res.json({
+    revenuParMois: result.revenuParMois,
+    occupationParTypeChambre: result.occupationParTypeChambre,
+    chambrePlusDemandee,
+    delaiMoyenConfirmationHeures,
+  });
+});
+
+module.exports = { list, getById, create, update, remove, stats };
+// ==== src/controllers/reservations.stats.js ( lignes) ====
+
+// ==== src/routes/reservations.routes.js (15 lignes) ====
+const { Router } = require('express');
+const controller = require('../controllers/reservations.controller');
+
+const router = Router();
+
+// /stats avant /:id pour que "stats" ne soit jamais interprété comme un id.
+router.get('/stats', controller.stats);
+
+router.get('/', controller.list);
+router.get('/:id', controller.getById);
+router.post('/', controller.create);
+router.patch('/:id', controller.update);
+router.delete('/:id', controller.remove);
+
+module.exports = router;
+
+// ==== src/middleware/asyncHandler.js (7 lignes) ====
+// Évite de répéter try/catch dans chaque contrôleur : toute erreur (sync ou
+// dans une promesse rejetée) est transmise à errorHandler.js.
+const asyncHandler = (fn) => (req, res, next) => {
+  Promise.resolve(fn(req, res, next)).catch(next);
+};
+
+module.exports = { asyncHandler };
+
+// ==== src/middleware/errorHandler.js (31 lignes) ====
+const { ZodError } = require('zod');
+
+class ApiError extends Error {
+  constructor(statusCode, message) {
+    super(message);
+    this.statusCode = statusCode;
+  }
+}
+
+// eslint-disable-next-line no-unused-vars
+function errorHandler(err, req, res, next) {
+  if (err instanceof ZodError) {
+    return res.status(400).json({
+      error: 'validation_error',
+      details: err.errors.map((e) => ({ field: e.path.join('.'), message: e.message })),
+    });
+  }
+
+  if (err instanceof ApiError) {
+    return res.status(err.statusCode).json({ error: err.message });
+  }
+
+  if (err.name === 'CastError') {
+    return res.status(400).json({ error: 'id_invalide' });
+  }
+
+  console.error('[unhandled]', err);
+  return res.status(500).json({ error: 'erreur_interne' });
+}
+
+module.exports = { errorHandler, ApiError };
+
