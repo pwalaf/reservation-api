@@ -1,128 +1,171 @@
 # Reservation API
 
-API de gestion de réservations pour petites structures d'hébergement
-(hôtels, gîtes) — CRUD complet, filtres/tri/pagination, exports CSV/PDF,
-et statistiques via agrégation MongoDB.
+Une application web simple pour gérer les réservations d'un hôtel, d'un gîte ou d'une petite structure d'hébergement.
 
-Pensée pour être montrée en quelques minutes : une seule collection, un
-pipeline d'agrégation qui répond à une vraie question métier (revenu,
-occupation, chambre la plus demandée), et une interface qui reste utilisable
-du mobile au grand écran.
+Elle permet de gérer les réservations, rechercher des clients, filtrer les données, suivre les statistiques et exporter les informations en CSV ou PDF.
+
+## Fonctionnalités
+
+* Création, modification et suppression de réservations
+* Recherche de clients
+* Filtres par statut, type de chambre et dates
+* Tri et pagination
+* Export des réservations en CSV ou PDF
+* Statistiques sur les revenus et l'occupation
+* Interface responsive, adaptée au mobile et au bureau
+* Validation des données et gestion des erreurs
+
+## Technologies
+
+**Frontend**
+
+* React
+* Vite
+* JavaScript
+* CSS
+
+**Backend**
+
+* Node.js
+* Express
+* MongoDB
+* Mongoose
+* Zod
+
+**Déploiement**
+
+* Frontend : Vercel
+* Backend : Render
+* Base de données : MongoDB Atlas
+
+## Comment ça fonctionne
+
+L'application est composée de deux parties :
+
+**Le frontend React** permet à l'utilisateur de gérer les réservations depuis une interface simple.
+
+**L'API Node.js / Express** traite les demandes, vérifie les données et communique avec MongoDB.
+
+Les deux parties communiquent à travers une API REST.
+
+## Quelques choix techniques
+
+Les réservations sont stockées dans MongoDB avec leur historique de statuts directement dans le document.
+
+La partie statistiques utilise les outils d'agrégation de MongoDB pour calculer notamment :
+
+* le revenu par mois ;
+* l'occupation par type de chambre ;
+* les chambres les plus demandées.
+
+Les filtres, le tri et la pagination sont regroupés dans des fonctions réutilisables afin de garder un comportement cohérent entre l'interface et les exports.
+
+Les données sont également contrôlées à plusieurs niveaux pour éviter les informations invalides ou incohérentes.
 
 ## Installation
+
+### Backend
 
 ```bash
 npm install
 cp .env.example .env
-# renseigner MONGODB_URI dans .env (un cluster Atlas gratuit suffit)
-npm run seed   # peuple la base avec des données de démo
-npm run dev    # démarre le serveur avec rechargement automatique
 ```
 
-## Endpoints
+Ajouter votre connexion MongoDB dans `.env` :
 
-| Méthode | Route                     | Description                                          |
-|---------|---------------------------|--------------------------------------------------------|
-| GET     | /api/reservations         | Liste paginée, filtrée et triée (voir params ci-dessous)|
-| GET     | /api/reservations/export  | Export CSV ou PDF du même jeu filtré (sans pagination)  |
-| GET     | /api/reservations/stats   | Revenu/mois, occupation par type, top room              |
-| GET     | /api/reservations/:id     | Détail d'une réservation                                |
-| POST    | /api/reservations         | Créer une réservation                                   |
-| PATCH   | /api/reservations/:id     | Modifier (ex: changer le statut)                        |
-| DELETE  | /api/reservations/:id     | Supprimer                                               |
+```env
+PORT=4000
+MONGODB_USERNAME=your_mongodb_username
+MONGODB_PASSWORD=your_mongodb_password
+MONGODB_URI=your_mongodb_connection_string
+```
 
-### Paramètres de `GET /api/reservations` et `/export`
-
-| Param         | Exemple                  | Effet                                              |
-|---------------|---------------------------|-----------------------------------------------------|
-| `status`      | `confirmee`               | Filtre par statut                                    |
-| `roomType`    | `suite`                   | Filtre par type de chambre                           |
-| `search`      | `rakoto`                  | Recherche partielle sur le nom du client (insensible à la casse) |
-| `checkInFrom` | `2026-10-01`               | Réservations arrivant à partir de cette date         |
-| `checkInTo`   | `2026-10-31`               | Réservations arrivant jusqu'à cette date (incluse)   |
-| `sort`        | `-amount`, `checkIn`, `clientName` | Tri ascendant par défaut, `-` en préfixe = descendant |
-| `page`, `limit` | `page=2&limit=20`        | Pagination (`/export` l'ignore, plafonné à 1000 lignes) |
-| `format`      | `csv` \| `pdf`             | Uniquement sur `/export`, CSV par défaut             |
-
-`GET /api/reservations` renvoie `{ data: [...], meta: { page, limit, total, totalPages } }`.
-
-## Démo rapide (curl)
+Puis ajouter les données d'exemples et lancer le serveur :
 
 ```bash
-# Créer une réservation
-curl -X POST http://localhost:4000/api/reservations \
-  -H "Content-Type: application/json" \
-  -d '{
-    "clientName": "Rina Randria",
-    "roomType": "double",
-    "checkIn": "2026-09-01",
-    "checkOut": "2026-09-03",
-    "status": "confirmee",
-    "amount": 130000
-  }'
-
-# Lister les réservations confirmées, triées par montant décroissant
-curl "http://localhost:4000/api/reservations?status=confirmee&sort=-amount"
-
-# Exporter en CSV les réservations de suite arrivant en octobre
-curl "http://localhost:4000/api/reservations/export?roomType=suite&checkInFrom=2026-10-01&checkInTo=2026-10-31&format=csv" -o export.csv
-
-# Statistiques (revenu par mois, occupation par type de chambre)
-curl http://localhost:4000/api/reservations/stats
+npm run seed
+npm run dev
 ```
 
-Le script `test-api.sh` couvre tous ces cas (filtres, tri, pagination,
-export, erreurs attendues) — `./test-api.sh` une fois le serveur lancé.
+L'API sera disponible sur :
 
-## Interface (client/)
+```text
+http://localhost:4000
+```
 
-Un client React (Vite) minimal pour piloter l'API : statistiques en tête de
-page, onglets de statut + recherche, un panneau de filtres avancés replié par
-défaut (type de chambre, plage de dates d'arrivée), tri, pagination, export
-CSV/PDF, et des notifications (toasts) pour chaque action. Pleine largeur et
-responsive — le tableau devient une pile de cartes sous 720px. Pas de
-bibliothèque UI — CSS sur-mesure avec des tokens de design définis dans
-`client/src/styles/tokens.css`.
+### Frontend
 
 ```bash
 cd client
 npm install
-npm run dev   # http://localhost:5173, l'API doit tourner sur le port 4000
+npm run dev
 ```
 
-Variable d'environnement du client : `VITE_API_URL` (URL de l'API, sans
-slash final). En local, `http://localhost:4000` est utilisé par défaut.
+L'application sera disponible sur :
+
+```text
+http://localhost:5173
+```
+
+Pour utiliser une autre URL d'API, définir :
+
+```env
+VITE_API_URL=http://localhost:4000
+```
+
+## API
+
+| Méthode | Route                      | Description               |
+| ------- | -------------------------- | ------------------------- |
+| GET     | `/api/reservations`        | Liste des réservations    |
+| GET     | `/api/reservations/stats`  | Statistiques              |
+| GET     | `/api/reservations/export` | Export CSV ou PDF         |
+| GET     | `/api/reservations/:id`    | Détail d'une réservation  |
+| POST    | `/api/reservations`        | Créer une réservation     |
+| PATCH   | `/api/reservations/:id`    | Modifier une réservation  |
+| DELETE  | `/api/reservations/:id`    | Supprimer une réservation |
+
+La liste des réservations accepte notamment les paramètres `status`, `roomType`, `search`, `checkInFrom`, `checkInTo`, `sort`, `page` et `limit`.
+
+## Tests
+
+Le fichier `test-api.sh` permet de vérifier les principales fonctionnalités de l'API, notamment :
+
+* création et modification ;
+* filtres et recherche ;
+* tri et pagination ;
+* exports ;
+* gestion des erreurs.
+
+Pour l'utiliser :
+
+```bash
+./test-api.sh
+```
 
 ## Déploiement
 
-- **Backend → Render** : Web Service pointant sur la racine du repo,
-  `npm install` / `npm start`. Variables d'environnement : `MONGODB_URI`,
-  et `CORS_ORIGIN` (URL du client Vercel, pour restreindre le CORS en
-  production — laissé vide, CORS est ouvert à tout, pratique en local).
-- **Frontend → Vercel** : projet avec Root Directory `client`, preset Vite.
-  Variable d'environnement : `VITE_API_URL` = URL du backend Render.
+Le projet peut être facilement déployé avec :
 
-## Ce que ce mini-projet démontre
+* **Vercel** pour le frontend ;
+* **Render** pour le backend ;
+* **MongoDB Atlas** pour la base de données.
 
-- Schéma Mongoose avec validation au niveau du modèle (règle métier :
-  `checkOut` après `checkIn`) en plus de la validation HTTP.
-- Validation stricte des entrées avec Zod, erreurs renvoyées en JSON structuré.
-- Gestion d'erreurs centralisée (`errorHandler.js`) plutôt que des
-  try/catch dupliqués dans chaque route.
-- Pipeline d'agrégation MongoDB (`$facet`, `$group`, `$match`, `$unwind`)
-  qui répond en un seul aller-retour base de données à trois questions
-  métier réelles.
-- Filtrage, tri et pagination construits comme des fonctions pures
-  (`src/utils/reservationQuery.js`), partagées entre la liste et l'export —
-  donc testables sans base de données et garanties cohérentes entre les deux.
-- Index composé (`status`, `checkIn`) pour les requêtes filtrées les plus
-  fréquentes.
-- Génération de CSV (échappement correct, BOM UTF-8 pour Excel) et de PDF
-  (`pdfkit`) à partir du même jeu de données filtré que l'écran.
+Les variables d'environnement permettent de configurer la connexion à la base de données et l'URL du frontend.
 
-## Pour aller plus loin (hors scope de cette version rapide)
+## Améliorations possibles
 
-- Authentification (un gérant par structure)
-- Suite de tests automatisés (Jest/Supertest) en plus du script curl manuel
-- CI (lint + tests à chaque push)
-- Notifications (email/SMS) de confirmation
+Quelques fonctionnalités pourraient être ajoutées dans une prochaine version :
+
+* authentification des utilisateurs ;
+* tests automatisés avec Jest et Supertest ;
+* intégration continue (CI) ;
+* notifications par email ou SMS.
+
+## Projet en ligne
+
+**Application :**
+https://reserver-une-chambre.vercel.app/
+
+**Code source :**
+GitHub — voir le dépôt associé.
