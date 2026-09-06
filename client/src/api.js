@@ -20,12 +20,25 @@ async function request(path, options) {
   return body;
 }
 
+function toQueryString(params = {}) {
+  const query = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') {
+      query.set(key, value);
+    }
+  });
+  const str = query.toString();
+  return str ? `?${str}` : '';
+}
+
 export const reservationsApi = {
-  list: () => request(''),
+  list: (params) => request(toQueryString(params)),
   stats: () => request('/stats'),
   create: (payload) => request('', { method: 'POST', body: JSON.stringify(payload) }),
   update: (id, payload) => request(`/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
   updateStatus: (id, status) =>
     request(`/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
   remove: (id) => request(`/${id}`, { method: 'DELETE' }),
+  exportUrl: (format, params) =>
+    `${BASE_URL}/export${toQueryString({ ...params, format })}`,
 };

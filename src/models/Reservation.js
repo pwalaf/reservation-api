@@ -19,10 +19,6 @@ const reservationSchema = new mongoose.Schema(
     checkIn: { type: Date, required: true },
     checkOut: { type: Date, required: true },
     status: { type: String, enum: STATUSES, default: 'en_attente' },
-    // Historique embarqué plutôt qu'une collection séparée jointe par _id :
-    // on relit toujours l'historique avec la réservation elle-même, jamais
-    // seul — c'est exactement le cas d'usage où le modèle document de
-    // MongoDB évite une jointure pour rien.
     statusHistory: {
       type: [statusHistoryEntrySchema],
       default: () => [{ status: 'en_attente', changedAt: new Date() }],
@@ -33,8 +29,6 @@ const reservationSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// checkOut doit toujours être après checkIn — évite les données incohérentes
-// dès l'écriture, indépendamment de la couche de validation HTTP.
 reservationSchema.pre('validate', function guardDateRange(next) {
   if (this.checkIn && this.checkOut && this.checkOut <= this.checkIn) {
     next(new Error('checkOut doit être postérieur à checkIn'));
@@ -44,6 +38,10 @@ reservationSchema.pre('validate', function guardDateRange(next) {
 });
 
 reservationSchema.index({ status: 1, checkIn: 1 });
+// Un index simple sur clientName n'accélère que les recherches ancrées en
+// début de chaîne. La recherche ?search= est une sous-chaîne libre, donc
+// elle scanne la collection quel que soit l'index — acceptable à ce volume.
+reservationSchema.index({ clientName: 1 });
 
 module.exports = {
   Reservation: mongoose.model('Reservation', reservationSchema),

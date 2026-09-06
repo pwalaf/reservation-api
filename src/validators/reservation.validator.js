@@ -25,9 +25,4 @@ const checkOutAfterCheckIn = (data, ctx) => {
 const createReservationSchema = baseReservationSchema.superRefine(checkOutAfterCheckIn);
 const updateReservationSchema = baseReservationSchema.partial().superRefine(checkOutAfterCheckIn);
 
-const listQuerySchema = z.object({
-  status: z.enum(STATUSES).optional(),
-  roomType: z.enum(ROOM_TYPES).optional(),
-});
-
-module.exports = { createReservationSchema, updateReservationSchema, listQuerySchema };
+module.exports = { createReservationSchema, updateReservationSchema };

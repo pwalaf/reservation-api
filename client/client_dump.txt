@@ -1,0 +1,2346 @@
+// ==== ./client/package.json (19 lignes) ====
+{
+  "name": "reservation-client",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.1",
+    "vite": "^5.4.2"
+  }
+}
+
+// ==== ./client/src/api.js (31 lignes) ====
+const BASE_URL = `${import.meta.env.VITE_API_URL ?? 'http://localhost:4000'}/api/reservations`;
+
+async function request(path, options) {
+  const response = await fetch(`${BASE_URL}${path}`, {
+    headers: { 'Content-Type': 'application/json' },
+    ...options,
+  });
+
+  if (response.status === 204) {
+    return null;
+  }
+
+  const body = await response.json();
+
+  if (!response.ok) {
+    const message = body.details?.[0]?.message ?? body.error ?? 'Une erreur est survenue';
+    throw new Error(message);
+  }
+
+  return body;
+}
+
+export const reservationsApi = {
+  list: () => request(''),
+  stats: () => request('/stats'),
+  create: (payload) => request('', { method: 'POST', body: JSON.stringify(payload) }),
+  update: (id, payload) => request(`/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+  updateStatus: (id, status) =>
+    request(`/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
+  remove: (id) => request(`/${id}`, { method: 'DELETE' }),
+};
+
+// ==== ./client/src/App.jsx (140 lignes) ====
+import { useEffect, useState, useCallback, useMemo } from 'react';
+import { reservationsApi } from './api.js';
+import { useToast } from './components/ToastProvider.jsx';
+import StatsBar from './components/StatsBar.jsx';
+import FilterTabs from './components/FilterTabs.jsx';
+import ReservationsTable from './components/ReservationsTable.jsx';
+import ReservationForm from './components/ReservationForm.jsx';
+
+export default function App() {
+  const toast = useToast();
+  const [reservations, setReservations] = useState([]);
+  const [stats, setStats] = useState(null);
+  const [activeTab, setActiveTab] = useState('toutes');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [showForm, setShowForm] = useState(false);
+  const [editingReservation, setEditingReservation] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  const loadData = useCallback(async () => {
+    setError(null);
+    try {
+      const [reservationsData, statsData] = await Promise.all([
+        reservationsApi.list(),
+        reservationsApi.stats(),
+      ]);
+      setReservations(reservationsData);
+      setStats(statsData);
+    } catch (loadError) {
+      setError(loadError.message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  const visibleReservations = useMemo(() => {
+    const byStatus =
+      activeTab === 'toutes' ? reservations : reservations.filter((r) => r.status === activeTab);
+    const term = searchTerm.trim().toLowerCase();
+    if (!term) return byStatus;
+    return byStatus.filter((r) => r.clientName.toLowerCase().includes(term));
+  }, [reservations, activeTab, searchTerm]);
+
+  async function handleCreate(payload) {
+    await reservationsApi.create(payload);
+    setShowForm(false);
+    toast.success('Réservation créée.');
+    await loadData();
+  }
+
+  async function handleUpdate(payload) {
+    await reservationsApi.update(editingReservation._id, payload);
+    setEditingReservation(null);
+    toast.success('Réservation mise à jour.');
+    await loadData();
+  }
+
+  async function handleStatusChange(id, status) {
+    const previous = reservations;
+    setReservations((current) =>
+      current.map((reservation) => (reservation._id === id ? { ...reservation, status } : reservation))
+    );
+    try {
+      await reservationsApi.updateStatus(id, status);
+      toast.success('Statut mis à jour.');
+      await loadData();
+    } catch (updateError) {
+      setReservations(previous);
+      toast.error(updateError.message);
+    }
+  }
+
+  async function handleDelete(id) {
+    const confirmed = window.confirm('Supprimer cette réservation ?');
+    if (!confirmed) return;
+
+    try {
+      await reservationsApi.remove(id);
+      toast.success('Réservation supprimée.');
+      await loadData();
+    } catch (deleteError) {
+      toast.error(deleteError.message);
+    }
+  }
+
+  return (
+    <div className="app">
+      <header className="app-header">
+        <div>
+          <h1 className="app-title">Réservations</h1>
+          <p className="app-subtitle">Vue d'ensemble des séjours et de l'occupation</p>
+        </div>
+        <button type="button" className="btn btn-primary" onClick={() => setShowForm(true)}>
+          Nouvelle réservation
+        </button>
+      </header>
+
+      {error && <div className="error-banner">{error}</div>}
+
+      {loading ? (
+        <p>Chargement...</p>
+      ) : (
+        <>
+          {stats && <StatsBar stats={stats} />}
+
+          <div className="toolbar">
+            <FilterTabs active={activeTab} onChange={setActiveTab} />
+            <input
+              type="search"
+              className="search-input"
+              placeholder="Rechercher un client..."
+              value={searchTerm}
+              onChange={(event) => setSearchTerm(event.target.value)}
+            />
+          </div>
+
+          <ReservationsTable
+            reservations={visibleReservations}
+            onStatusChange={handleStatusChange}
+            onEdit={setEditingReservation}
+            onDelete={handleDelete}
+          />
+        </>
+      )}
+
+      {showForm && <ReservationForm onSubmit={handleCreate} onClose={() => setShowForm(false)} />}
+      {editingReservation && (
+        <ReservationForm
+          reservation={editingReservation}
+          onSubmit={handleUpdate}
+          onClose={() => setEditingReservation(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ==== ./client/src/components/FilterTabs.jsx (24 lignes) ====
+const TABS = [
+  { value: 'toutes', label: 'Toutes' },
+  { value: 'confirmee', label: 'Confirmées' },
+  { value: 'en_attente', label: 'En attente' },
+  { value: 'annulee', label: 'Annulées' },
+];
+
+export default function FilterTabs({ active, onChange }) {
+  return (
+    <div className="tabs">
+      {TABS.map((tab) => (
+        <button
+          key={tab.value}
+          type="button"
+          className="tab"
+          data-active={active === tab.value}
+          onClick={() => onChange(tab.value)}
+        >
+          {tab.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ==== ./client/src/components/ReservationForm.jsx (108 lignes) ====
+import { useState } from 'react';
+import { ROOM_TYPE_LABELS } from '../format.js';
+
+const initialForm = {
+  clientName: '',
+  clientPhone: '',
+  roomType: 'simple',
+  checkIn: '',
+  checkOut: '',
+  amount: '',
+};
+
+function toFormValues(reservation) {
+  return {
+    clientName: reservation.clientName,
+    clientPhone: reservation.clientPhone ?? '',
+    roomType: reservation.roomType,
+    checkIn: reservation.checkIn.slice(0, 10),
+    checkOut: reservation.checkOut.slice(0, 10),
+    amount: String(reservation.amount),
+  };
+}
+
+export default function ReservationForm({ reservation, onSubmit, onClose }) {
+  const isEdit = Boolean(reservation);
+  const [form, setForm] = useState(isEdit ? toFormValues(reservation) : initialForm);
+  const [error, setError] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const update = (field) => (event) => {
+    setForm((current) => ({ ...current, [field]: event.target.value }));
+  };
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    setError(null);
+
+    if (form.checkIn && form.checkOut && form.checkOut <= form.checkIn) {
+      setError('La date de départ doit être postérieure à la date d\'arrivée.');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await onSubmit({ ...form, amount: Number(form.amount) });
+    } catch (submitError) {
+      setError(submitError.message);
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" onClick={(event) => event.stopPropagation()}>
+        <h2 className="modal-title">{isEdit ? 'Modifier la réservation' : 'Nouvelle réservation'}</h2>
+        <form onSubmit={handleSubmit}>
+          <div className="field">
+            <label htmlFor="clientName">Nom du client</label>
+            <input id="clientName" required value={form.clientName} onChange={update('clientName')} />
+          </div>
+
+          <div className="field">
+            <label htmlFor="clientPhone">Téléphone (optionnel)</label>
+            <input id="clientPhone" value={form.clientPhone} onChange={update('clientPhone')} />
+          </div>
+
+          <div className="field">
+            <label htmlFor="roomType">Type de chambre</label>
+            <select id="roomType" value={form.roomType} onChange={update('roomType')}>
+              {Object.entries(ROOM_TYPE_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="field-row">
+            <div className="field">
+              <label htmlFor="checkIn">Arrivée</label>
+              <input id="checkIn" type="date" required value={form.checkIn} onChange={update('checkIn')} />
+            </div>
+            <div className="field">
+              <label htmlFor="checkOut">Départ</label>
+              <input id="checkOut" type="date" required value={form.checkOut} onChange={update('checkOut')} />
+            </div>
+          </div>
+
+          <div className="field">
+            <label htmlFor="amount">Montant (Ar)</label>
+            <input id="amount" type="number" min="0" required value={form.amount} onChange={update('amount')} />
+          </div>
+
+          {error && <p className="field-error">{error}</p>}
+
+          <div className="modal-actions">
+            <button type="button" className="btn" onClick={onClose}>
+              Annuler
+            </button>
+            <button type="submit" className="btn btn-primary" disabled={submitting}>
+              {submitting ? 'Enregistrement...' : isEdit ? 'Enregistrer' : 'Créer la réservation'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ==== ./client/src/components/ReservationsTable.jsx (73 lignes) ====
+import { formatAmount, formatDate, roomTypeLabel, STATUS_LABELS } from '../format.js';
+
+export default function ReservationsTable({ reservations, onStatusChange, onEdit, onDelete }) {
+  if (reservations.length === 0) {
+    return (
+      <div className="table-wrap">
+        <div className="empty-state">
+          <p className="empty-state-title">Aucune réservation</p>
+          <p>Aucun résultat pour ce filtre.</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Client</th>
+            <th>Chambre</th>
+            <th>Séjour</th>
+            <th>Statut</th>
+            <th className="cell-amount">Montant</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {reservations.map((reservation) => (
+            <tr key={reservation._id}>
+              <td data-label="Client">{reservation.clientName}</td>
+              <td data-label="Chambre">{roomTypeLabel(reservation.roomType)}</td>
+              <td data-label="Séjour" className="cell-dates">
+                {formatDate(reservation.checkIn)} — {formatDate(reservation.checkOut)}
+              </td>
+              <td data-label="Statut">
+                <select
+                  className="status-select"
+                  data-status={reservation.status}
+                  value={reservation.status}
+                  onChange={(event) => onStatusChange(reservation._id, event.target.value)}
+                  aria-label={`Statut de la réservation de ${reservation.clientName}`}
+                >
+                  {Object.entries(STATUS_LABELS).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </td>
+              <td data-label="Montant" className="cell-amount">
+                {formatAmount(reservation.amount)}
+              </td>
+              <td data-label="Actions" className="cell-actions">
+                <button type="button" className="btn-danger-text" onClick={() => onEdit(reservation)}>
+                  Modifier
+                </button>
+                <button
+                  type="button"
+                  className="btn-danger-text"
+                  onClick={() => onDelete(reservation._id)}
+                  aria-label={`Supprimer la réservation de ${reservation.clientName}`}
+                >
+                  Supprimer
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ==== ./client/src/components/StatsBar.jsx (31 lignes) ====
+import { formatAmount, monthLabel, roomTypeLabel } from '../format.js';
+
+export default function StatsBar({ stats }) {
+  const latestMonth = stats.revenuParMois.at(-1);
+  const revenueLabel = latestMonth
+    ? `${monthLabel(latestMonth._id.mois)} ${latestMonth._id.annee}`
+    : 'Aucune donnée';
+  const topRoom = stats.occupationParTypeChambre[0];
+
+  return (
+    <div className="stats">
+      <div className="stat-card">
+        <p className="stat-label">Revenu confirmé</p>
+        <p className="stat-value">{formatAmount(latestMonth?.revenu ?? 0)}</p>
+        <p className="stat-meta">{revenueLabel}</p>
+      </div>
+      <div className="stat-card">
+        <p className="stat-label">Chambre la plus demandée</p>
+        <p className="stat-value">{stats.chambrePlusDemandee ? roomTypeLabel(stats.chambrePlusDemandee) : '—'}</p>
+        <p className="stat-meta">{topRoom ? `${topRoom.nombreReservations} réservations` : 'Aucune donnée'}</p>
+      </div>
+      <div className="stat-card">
+        <p className="stat-label">Total réservations</p>
+        <p className="stat-value">
+          {stats.occupationParTypeChambre.reduce((sum, entry) => sum + entry.nombreReservations, 0)}
+        </p>
+        <p className="stat-meta">Tous statuts confondus</p>
+      </div>
+    </div>
+  );
+}
+
+// ==== ./client/src/components/ToastProvider.jsx (69 lignes) ====
+import { createContext, useCallback, useContext, useRef, useState } from 'react';
+
+const ToastContext = createContext(null);
+
+let nextId = 0;
+
+/**
+ * Fournit un système de notifications transitoires (succès / erreur) pour
+ * donner un retour visuel après chaque action (créer, modifier, supprimer...).
+ * Aucune dépendance externe : juste du state React + une région ARIA live
+ * pour que les lecteurs d'écran annoncent aussi les messages.
+ */
+export function ToastProvider({ children }) {
+  const [toasts, setToasts] = useState([]);
+  const timers = useRef(new Map());
+
+  const dismiss = useCallback((id) => {
+    setToasts((current) => current.filter((toast) => toast.id !== id));
+    const timer = timers.current.get(id);
+    if (timer) {
+      clearTimeout(timer);
+      timers.current.delete(id);
+    }
+  }, []);
+
+  const push = useCallback(
+    (message, variant, duration) => {
+      const id = nextId++;
+      setToasts((current) => [...current, { id, message, variant }]);
+      const timer = setTimeout(() => dismiss(id), duration);
+      timers.current.set(id, timer);
+    },
+    [dismiss]
+  );
+
+  const toast = useRef({
+    success: (message) => push(message, 'success', 4000),
+    error: (message) => push(message, 'error', 6000),
+  }).current;
+
+  return (
+    <ToastContext.Provider value={toast}>
+      {children}
+      <div className="toast-viewport" role="status" aria-live="polite">
+        {toasts.map((item) => (
+          <div key={item.id} className="toast" data-variant={item.variant}>
+            <p className="toast-message">{item.message}</p>
+            <button
+              type="button"
+              className="toast-close"
+              onClick={() => dismiss(item.id)}
+              aria-label="Fermer la notification"
+            >
+              ×
+            </button>
+          </div>
+        ))}
+      </div>
+    </ToastContext.Provider>
+  );
+}
+
+export function useToast() {
+  const context = useContext(ToastContext);
+  if (!context) {
+    throw new Error("useToast doit être utilisé à l'intérieur d'un <ToastProvider>");
+  }
+  return context;
+}
+
+// ==== ./client/src/format.js (40 lignes) ====
+const ROOM_TYPE_LABELS = {
+  simple: 'Simple',
+  double: 'Double',
+  suite: 'Suite',
+  dortoir: 'Dortoir',
+};
+
+const STATUS_LABELS = {
+  en_attente: 'En attente',
+  confirmee: 'Confirmée',
+  annulee: 'Annulée',
+};
+
+const MONTH_LABELS = [
+  'Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin',
+  'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre',
+];
+
+export function formatAmount(amount) {
+  return `${new Intl.NumberFormat('fr-FR').format(amount)} Ar`;
+}
+
+export function formatDate(isoString) {
+  const date = new Date(isoString);
+  return new Intl.DateTimeFormat('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' }).format(date);
+}
+
+export function roomTypeLabel(roomType) {
+  return ROOM_TYPE_LABELS[roomType] ?? roomType;
+}
+
+export function statusLabel(status) {
+  return STATUS_LABELS[status] ?? status;
+}
+
+export function monthLabel(monthNumber) {
+  return MONTH_LABELS[monthNumber - 1] ?? String(monthNumber);
+}
+
+export { ROOM_TYPE_LABELS, STATUS_LABELS };
+
+// ==== ./client/src/main.jsx (14 lignes) ====
+import { StrictMode } from 'react';
+import { createRoot } from 'react-dom/client';
+import App from './App.jsx';
+import { ToastProvider } from './components/ToastProvider.jsx';
+import './styles/tokens.css';
+import './styles/global.css';
+
+createRoot(document.getElementById('root')).render(
+  <StrictMode>
+    <ToastProvider>
+      <App />
+    </ToastProvider>
+  </StrictMode>
+);
+
+// ==== ./client/src/styles/global.css (538 lignes) ====
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Layout shell ---------------------------------------------------------
+   Toute la largeur de l'écran : plus de conteneur à largeur fixe centré.
+   Le padding latéral est fluide (clamp) pour rester confortable aussi bien
+   sur mobile que sur un très grand écran, sans jamais laisser de bandes
+   vides artificielles. */
+
+.app {
+  width: 100%;
+  padding-block: var(--space-7) var(--space-8);
+  padding-inline: clamp(var(--space-4), 4vw, var(--space-8));
+}
+
+.app-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-6);
+  padding-bottom: var(--space-5);
+  border-bottom: 1px solid var(--border);
+}
+
+.app-title {
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: 28px;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+
+.app-subtitle {
+  color: var(--ink-soft);
+  font-size: 13px;
+  margin-top: var(--space-1);
+}
+
+/* Stats ----------------------------------------------------------------- */
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  margin-bottom: var(--space-6);
+}
+
+.stat-card {
+  background: var(--surface);
+  padding: var(--space-5);
+}
+
+.stat-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-soft);
+  margin: 0 0 var(--space-3);
+}
+
+.stat-value {
+  font-family: var(--font-mono);
+  font-size: 24px;
+  font-variant-numeric: tabular-nums;
+  margin: 0;
+}
+
+.stat-meta {
+  font-size: 12px;
+  color: var(--ink-faint);
+  margin-top: var(--space-2);
+}
+
+/* Toolbar ---------------------------------------------------------------- */
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.search-input {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface);
+  width: 220px;
+  max-width: 100%;
+}
+
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.tab {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  padding: var(--space-2) var(--space-3);
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.tab:hover {
+  color: var(--ink);
+}
+
+.tab[data-active='true'] {
+  background: var(--accent-tint);
+  color: var(--accent-strong);
+  border-color: var(--accent-tint);
+}
+
+.btn {
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: var(--space-2) var(--space-4);
+  cursor: pointer;
+  border-left-width: 1px;
+  transition: border-left-width 120ms ease;
+}
+
+.btn:hover {
+  border-left: 2px solid var(--accent);
+}
+
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--surface);
+}
+
+.btn-primary:hover {
+  background: var(--accent-strong);
+  border-left-width: 1px;
+}
+
+.btn-danger-text {
+  background: none;
+  border: none;
+  color: var(--ink-faint);
+  cursor: pointer;
+  padding: var(--space-1) var(--space-2);
+  margin-right: var(--space-1);
+}
+
+.btn-danger-text:hover {
+  color: var(--danger);
+}
+
+/* Table --------------------------------------------------------------
+   Sur grand écran : tableau classique en pleine largeur du conteneur.
+   Sous 720px : chaque ligne devient une carte, chaque cellule affiche son
+   libellé (via data-label) — plus de colonnes qui débordent ou de texte
+   tassé sur mobile. */
+
+.table-wrap {
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+thead th {
+  text-align: left;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+  font-weight: 500;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+
+tbody td {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+tbody tr:last-child td {
+  border-bottom: none;
+}
+
+tbody tr {
+  border-left: 2px solid transparent;
+}
+
+tbody tr:hover {
+  background: #fafaf9;
+  border-left-color: var(--accent);
+}
+
+.cell-amount {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.cell-dates {
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+.cell-actions {
+  white-space: nowrap;
+  text-align: right;
+}
+
+.status-select {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: var(--space-1) var(--space-2);
+  background: var(--surface);
+}
+
+.status-select[data-status='confirmee'] {
+  color: var(--accent-strong);
+}
+
+.status-select[data-status='annulee'] {
+  color: var(--danger);
+}
+
+.empty-state {
+  padding: var(--space-8) var(--space-5);
+  text-align: center;
+  color: var(--ink-soft);
+}
+
+.empty-state-title {
+  font-family: var(--font-display);
+  font-size: 18px;
+  color: var(--ink);
+  margin: 0 0 var(--space-2);
+}
+
+.error-banner {
+  border: 1px solid var(--danger);
+  background: var(--danger-tint);
+  color: var(--danger);
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-4);
+  font-size: 13px;
+}
+
+/* Form / modal ------------------------------------------------------- */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(28, 27, 25, 0.4);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: var(--space-7) var(--space-4);
+  overflow-y: auto;
+}
+
+.modal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  width: 100%;
+  max-width: 480px;
+  padding: var(--space-6);
+}
+
+.modal-title {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 500;
+  margin: 0 0 var(--space-5);
+}
+
+.field {
+  margin-bottom: var(--space-4);
+}
+
+.field label {
+  display: block;
+  font-size: 12px;
+  color: var(--ink-soft);
+  margin-bottom: var(--space-1);
+}
+
+.field input,
+.field select,
+.field textarea {
+  width: 100%;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface);
+}
+
+.field-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+}
+
+.field-error {
+  color: var(--danger);
+  font-size: 12px;
+  margin-top: var(--space-1);
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  margin-top: var(--space-6);
+}
+
+/* Toasts ---------------------------------------------------------------
+   Empilés en bas à droite sur desktop, pleine largeur en bas sur mobile
+   pour rester atteignables au pouce et ne jamais recouvrir le contenu
+   principal. */
+
+.toast-viewport {
+  position: fixed;
+  z-index: 1000;
+  bottom: var(--space-5);
+  right: var(--space-5);
+  left: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: min(360px, calc(100vw - var(--space-6)));
+  pointer-events: none;
+}
+
+.toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-left: 3px solid var(--ink-soft);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+  padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4);
+  animation: toast-in 180ms ease;
+}
+
+.toast[data-variant='success'] {
+  border-left-color: var(--success);
+}
+
+.toast[data-variant='error'] {
+  border-left-color: var(--danger);
+}
+
+.toast-message {
+  margin: 0;
+  font-size: 13px;
+  flex: 1;
+}
+
+.toast-close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--ink-faint);
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 var(--space-1);
+}
+
+.toast-close:hover {
+  color: var(--ink);
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast {
+    animation: none;
+  }
+}
+
+/* Responsive ----------------------------------------------------------- */
+
+@media (max-width: 720px) {
+  .app {
+    padding-inline: var(--space-4);
+    padding-block: var(--space-5) var(--space-6);
+  }
+
+  .app-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .app-header .btn-primary {
+    width: 100%;
+  }
+
+  .toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .search-input {
+    width: 100%;
+  }
+
+  .toast-viewport {
+    left: var(--space-3);
+    right: var(--space-3);
+    bottom: var(--space-3);
+    width: auto;
+  }
+
+  /* Le tableau devient une pile de cartes : une ligne = une carte, chaque
+     cellule affiche son libellé grâce à data-label plutôt que de dépendre
+     d'un en-tête de colonne devenu illisible en dessous de 720px. */
+  .table-wrap table,
+  .table-wrap thead,
+  .table-wrap tbody,
+  .table-wrap tr,
+  .table-wrap th,
+  .table-wrap td {
+    display: block;
+  }
+
+  .table-wrap thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+    padding: 0;
+    margin: -1px;
+  }
+
+  .table-wrap tbody tr {
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .table-wrap tbody tr:hover {
+    border-left-color: transparent;
+  }
+
+  .table-wrap td {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    padding: var(--space-2) 0;
+    border-bottom: none;
+    text-align: right;
+  }
+
+  .table-wrap td::before {
+    content: attr(data-label);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--ink-soft);
+    text-align: left;
+    flex-shrink: 0;
+  }
+
+  .cell-actions {
+    justify-content: flex-end;
+    text-align: right;
+  }
+
+  .cell-actions::before {
+    content: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .stats {
+    grid-template-columns: 1fr;
+  }
+  .field-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+// ==== ./client/src/styles/tokens.css (51 lignes) ====
+:root {
+  --bg: #f4f2ee;
+  --surface: #ffffff;
+  --border: #e6e2d9;
+  --border-strong: #d2ccbf;
+
+  --ink: #201e1a;
+  --ink-soft: #736c60;
+  --ink-faint: #a89f8f;
+
+  --accent: #2f4538;
+  --accent-strong: #1f2f26;
+  --accent-tint: #e6ede6;
+
+  --status-confirmee: #2f6b45;
+  --status-confirmee-bg: #e3f0e5;
+  --status-attente: #a3701f;
+  --status-attente-bg: #faefd9;
+  --status-annulee: #a34430;
+  --status-annulee-bg: #f7e6e0;
+
+  /* Alias sémantiques : utilisés par les bannières d'erreur, les toasts et
+     l'état "annulée" du select de statut. Ils n'étaient pas définis alors
+     qu'ils étaient déjà référencés dans global.css. */
+  --danger: var(--status-annulee);
+  --danger-tint: var(--status-annulee-bg);
+  --success: var(--status-confirmee);
+  --success-tint: var(--status-confirmee-bg);
+  --warning: var(--status-attente);
+  --warning-tint: var(--status-attente-bg);
+
+  --font-display: 'Fraunces', Georgia, serif;
+  --font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'IBM Plex Mono', 'SFMono-Regular', monospace;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+
+  --radius: 8px;
+  --radius-lg: 12px;
+  --radius-pill: 999px;
+
+  --shadow-card: 0 1px 2px rgba(32, 30, 26, 0.04), 0 8px 24px -16px rgba(32, 30, 26, 0.12);
+  --shadow-modal: 0 24px 64px -24px rgba(32, 30, 26, 0.35);
+}
+
+// ==== ./client/vite.config.js (9 lignes) ====
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    port: 5173,
+  },
+});
+
+// ==== ./package.json (19 lignes) ====
+{
+  "name": "reservation-client",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.1",
+    "vite": "^5.4.2"
+  }
+}
+
+// ==== ./src/api.js (31 lignes) ====
+const BASE_URL = `${import.meta.env.VITE_API_URL ?? 'http://localhost:4000'}/api/reservations`;
+
+async function request(path, options) {
+  const response = await fetch(`${BASE_URL}${path}`, {
+    headers: { 'Content-Type': 'application/json' },
+    ...options,
+  });
+
+  if (response.status === 204) {
+    return null;
+  }
+
+  const body = await response.json();
+
+  if (!response.ok) {
+    const message = body.details?.[0]?.message ?? body.error ?? 'Une erreur est survenue';
+    throw new Error(message);
+  }
+
+  return body;
+}
+
+export const reservationsApi = {
+  list: () => request(''),
+  stats: () => request('/stats'),
+  create: (payload) => request('', { method: 'POST', body: JSON.stringify(payload) }),
+  update: (id, payload) => request(`/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+  updateStatus: (id, status) =>
+    request(`/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) }),
+  remove: (id) => request(`/${id}`, { method: 'DELETE' }),
+};
+
+// ==== ./src/App.jsx (140 lignes) ====
+import { useEffect, useState, useCallback, useMemo } from 'react';
+import { reservationsApi } from './api.js';
+import { useToast } from './components/ToastProvider.jsx';
+import StatsBar from './components/StatsBar.jsx';
+import FilterTabs from './components/FilterTabs.jsx';
+import ReservationsTable from './components/ReservationsTable.jsx';
+import ReservationForm from './components/ReservationForm.jsx';
+
+export default function App() {
+  const toast = useToast();
+  const [reservations, setReservations] = useState([]);
+  const [stats, setStats] = useState(null);
+  const [activeTab, setActiveTab] = useState('toutes');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [showForm, setShowForm] = useState(false);
+  const [editingReservation, setEditingReservation] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  const loadData = useCallback(async () => {
+    setError(null);
+    try {
+      const [reservationsData, statsData] = await Promise.all([
+        reservationsApi.list(),
+        reservationsApi.stats(),
+      ]);
+      setReservations(reservationsData);
+      setStats(statsData);
+    } catch (loadError) {
+      setError(loadError.message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  const visibleReservations = useMemo(() => {
+    const byStatus =
+      activeTab === 'toutes' ? reservations : reservations.filter((r) => r.status === activeTab);
+    const term = searchTerm.trim().toLowerCase();
+    if (!term) return byStatus;
+    return byStatus.filter((r) => r.clientName.toLowerCase().includes(term));
+  }, [reservations, activeTab, searchTerm]);
+
+  async function handleCreate(payload) {
+    await reservationsApi.create(payload);
+    setShowForm(false);
+    toast.success('Réservation créée.');
+    await loadData();
+  }
+
+  async function handleUpdate(payload) {
+    await reservationsApi.update(editingReservation._id, payload);
+    setEditingReservation(null);
+    toast.success('Réservation mise à jour.');
+    await loadData();
+  }
+
+  async function handleStatusChange(id, status) {
+    const previous = reservations;
+    setReservations((current) =>
+      current.map((reservation) => (reservation._id === id ? { ...reservation, status } : reservation))
+    );
+    try {
+      await reservationsApi.updateStatus(id, status);
+      toast.success('Statut mis à jour.');
+      await loadData();
+    } catch (updateError) {
+      setReservations(previous);
+      toast.error(updateError.message);
+    }
+  }
+
+  async function handleDelete(id) {
+    const confirmed = window.confirm('Supprimer cette réservation ?');
+    if (!confirmed) return;
+
+    try {
+      await reservationsApi.remove(id);
+      toast.success('Réservation supprimée.');
+      await loadData();
+    } catch (deleteError) {
+      toast.error(deleteError.message);
+    }
+  }
+
+  return (
+    <div className="app">
+      <header className="app-header">
+        <div>
+          <h1 className="app-title">Réservations</h1>
+          <p className="app-subtitle">Vue d'ensemble des séjours et de l'occupation</p>
+        </div>
+        <button type="button" className="btn btn-primary" onClick={() => setShowForm(true)}>
+          Nouvelle réservation
+        </button>
+      </header>
+
+      {error && <div className="error-banner">{error}</div>}
+
+      {loading ? (
+        <p>Chargement...</p>
+      ) : (
+        <>
+          {stats && <StatsBar stats={stats} />}
+
+          <div className="toolbar">
+            <FilterTabs active={activeTab} onChange={setActiveTab} />
+            <input
+              type="search"
+              className="search-input"
+              placeholder="Rechercher un client..."
+              value={searchTerm}
+              onChange={(event) => setSearchTerm(event.target.value)}
+            />
+          </div>
+
+          <ReservationsTable
+            reservations={visibleReservations}
+            onStatusChange={handleStatusChange}
+            onEdit={setEditingReservation}
+            onDelete={handleDelete}
+          />
+        </>
+      )}
+
+      {showForm && <ReservationForm onSubmit={handleCreate} onClose={() => setShowForm(false)} />}
+      {editingReservation && (
+        <ReservationForm
+          reservation={editingReservation}
+          onSubmit={handleUpdate}
+          onClose={() => setEditingReservation(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ==== ./src/components/FilterTabs.jsx (24 lignes) ====
+const TABS = [
+  { value: 'toutes', label: 'Toutes' },
+  { value: 'confirmee', label: 'Confirmées' },
+  { value: 'en_attente', label: 'En attente' },
+  { value: 'annulee', label: 'Annulées' },
+];
+
+export default function FilterTabs({ active, onChange }) {
+  return (
+    <div className="tabs">
+      {TABS.map((tab) => (
+        <button
+          key={tab.value}
+          type="button"
+          className="tab"
+          data-active={active === tab.value}
+          onClick={() => onChange(tab.value)}
+        >
+          {tab.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ==== ./src/components/ReservationForm.jsx (108 lignes) ====
+import { useState } from 'react';
+import { ROOM_TYPE_LABELS } from '../format.js';
+
+const initialForm = {
+  clientName: '',
+  clientPhone: '',
+  roomType: 'simple',
+  checkIn: '',
+  checkOut: '',
+  amount: '',
+};
+
+function toFormValues(reservation) {
+  return {
+    clientName: reservation.clientName,
+    clientPhone: reservation.clientPhone ?? '',
+    roomType: reservation.roomType,
+    checkIn: reservation.checkIn.slice(0, 10),
+    checkOut: reservation.checkOut.slice(0, 10),
+    amount: String(reservation.amount),
+  };
+}
+
+export default function ReservationForm({ reservation, onSubmit, onClose }) {
+  const isEdit = Boolean(reservation);
+  const [form, setForm] = useState(isEdit ? toFormValues(reservation) : initialForm);
+  const [error, setError] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const update = (field) => (event) => {
+    setForm((current) => ({ ...current, [field]: event.target.value }));
+  };
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    setError(null);
+
+    if (form.checkIn && form.checkOut && form.checkOut <= form.checkIn) {
+      setError('La date de départ doit être postérieure à la date d\'arrivée.');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await onSubmit({ ...form, amount: Number(form.amount) });
+    } catch (submitError) {
+      setError(submitError.message);
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" onClick={(event) => event.stopPropagation()}>
+        <h2 className="modal-title">{isEdit ? 'Modifier la réservation' : 'Nouvelle réservation'}</h2>
+        <form onSubmit={handleSubmit}>
+          <div className="field">
+            <label htmlFor="clientName">Nom du client</label>
+            <input id="clientName" required value={form.clientName} onChange={update('clientName')} />
+          </div>
+
+          <div className="field">
+            <label htmlFor="clientPhone">Téléphone (optionnel)</label>
+            <input id="clientPhone" value={form.clientPhone} onChange={update('clientPhone')} />
+          </div>
+
+          <div className="field">
+            <label htmlFor="roomType">Type de chambre</label>
+            <select id="roomType" value={form.roomType} onChange={update('roomType')}>
+              {Object.entries(ROOM_TYPE_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="field-row">
+            <div className="field">
+              <label htmlFor="checkIn">Arrivée</label>
+              <input id="checkIn" type="date" required value={form.checkIn} onChange={update('checkIn')} />
+            </div>
+            <div className="field">
+              <label htmlFor="checkOut">Départ</label>
+              <input id="checkOut" type="date" required value={form.checkOut} onChange={update('checkOut')} />
+            </div>
+          </div>
+
+          <div className="field">
+            <label htmlFor="amount">Montant (Ar)</label>
+            <input id="amount" type="number" min="0" required value={form.amount} onChange={update('amount')} />
+          </div>
+
+          {error && <p className="field-error">{error}</p>}
+
+          <div className="modal-actions">
+            <button type="button" className="btn" onClick={onClose}>
+              Annuler
+            </button>
+            <button type="submit" className="btn btn-primary" disabled={submitting}>
+              {submitting ? 'Enregistrement...' : isEdit ? 'Enregistrer' : 'Créer la réservation'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ==== ./src/components/ReservationsTable.jsx (73 lignes) ====
+import { formatAmount, formatDate, roomTypeLabel, STATUS_LABELS } from '../format.js';
+
+export default function ReservationsTable({ reservations, onStatusChange, onEdit, onDelete }) {
+  if (reservations.length === 0) {
+    return (
+      <div className="table-wrap">
+        <div className="empty-state">
+          <p className="empty-state-title">Aucune réservation</p>
+          <p>Aucun résultat pour ce filtre.</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Client</th>
+            <th>Chambre</th>
+            <th>Séjour</th>
+            <th>Statut</th>
+            <th className="cell-amount">Montant</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {reservations.map((reservation) => (
+            <tr key={reservation._id}>
+              <td data-label="Client">{reservation.clientName}</td>
+              <td data-label="Chambre">{roomTypeLabel(reservation.roomType)}</td>
+              <td data-label="Séjour" className="cell-dates">
+                {formatDate(reservation.checkIn)} — {formatDate(reservation.checkOut)}
+              </td>
+              <td data-label="Statut">
+                <select
+                  className="status-select"
+                  data-status={reservation.status}
+                  value={reservation.status}
+                  onChange={(event) => onStatusChange(reservation._id, event.target.value)}
+                  aria-label={`Statut de la réservation de ${reservation.clientName}`}
+                >
+                  {Object.entries(STATUS_LABELS).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </td>
+              <td data-label="Montant" className="cell-amount">
+                {formatAmount(reservation.amount)}
+              </td>
+              <td data-label="Actions" className="cell-actions">
+                <button type="button" className="btn-danger-text" onClick={() => onEdit(reservation)}>
+                  Modifier
+                </button>
+                <button
+                  type="button"
+                  className="btn-danger-text"
+                  onClick={() => onDelete(reservation._id)}
+                  aria-label={`Supprimer la réservation de ${reservation.clientName}`}
+                >
+                  Supprimer
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ==== ./src/components/StatsBar.jsx (31 lignes) ====
+import { formatAmount, monthLabel, roomTypeLabel } from '../format.js';
+
+export default function StatsBar({ stats }) {
+  const latestMonth = stats.revenuParMois.at(-1);
+  const revenueLabel = latestMonth
+    ? `${monthLabel(latestMonth._id.mois)} ${latestMonth._id.annee}`
+    : 'Aucune donnée';
+  const topRoom = stats.occupationParTypeChambre[0];
+
+  return (
+    <div className="stats">
+      <div className="stat-card">
+        <p className="stat-label">Revenu confirmé</p>
+        <p className="stat-value">{formatAmount(latestMonth?.revenu ?? 0)}</p>
+        <p className="stat-meta">{revenueLabel}</p>
+      </div>
+      <div className="stat-card">
+        <p className="stat-label">Chambre la plus demandée</p>
+        <p className="stat-value">{stats.chambrePlusDemandee ? roomTypeLabel(stats.chambrePlusDemandee) : '—'}</p>
+        <p className="stat-meta">{topRoom ? `${topRoom.nombreReservations} réservations` : 'Aucune donnée'}</p>
+      </div>
+      <div className="stat-card">
+        <p className="stat-label">Total réservations</p>
+        <p className="stat-value">
+          {stats.occupationParTypeChambre.reduce((sum, entry) => sum + entry.nombreReservations, 0)}
+        </p>
+        <p className="stat-meta">Tous statuts confondus</p>
+      </div>
+    </div>
+  );
+}
+
+// ==== ./src/components/ToastProvider.jsx (69 lignes) ====
+import { createContext, useCallback, useContext, useRef, useState } from 'react';
+
+const ToastContext = createContext(null);
+
+let nextId = 0;
+
+/**
+ * Fournit un système de notifications transitoires (succès / erreur) pour
+ * donner un retour visuel après chaque action (créer, modifier, supprimer...).
+ * Aucune dépendance externe : juste du state React + une région ARIA live
+ * pour que les lecteurs d'écran annoncent aussi les messages.
+ */
+export function ToastProvider({ children }) {
+  const [toasts, setToasts] = useState([]);
+  const timers = useRef(new Map());
+
+  const dismiss = useCallback((id) => {
+    setToasts((current) => current.filter((toast) => toast.id !== id));
+    const timer = timers.current.get(id);
+    if (timer) {
+      clearTimeout(timer);
+      timers.current.delete(id);
+    }
+  }, []);
+
+  const push = useCallback(
+    (message, variant, duration) => {
+      const id = nextId++;
+      setToasts((current) => [...current, { id, message, variant }]);
+      const timer = setTimeout(() => dismiss(id), duration);
+      timers.current.set(id, timer);
+    },
+    [dismiss]
+  );
+
+  const toast = useRef({
+    success: (message) => push(message, 'success', 4000),
+    error: (message) => push(message, 'error', 6000),
+  }).current;
+
+  return (
+    <ToastContext.Provider value={toast}>
+      {children}
+      <div className="toast-viewport" role="status" aria-live="polite">
+        {toasts.map((item) => (
+          <div key={item.id} className="toast" data-variant={item.variant}>
+            <p className="toast-message">{item.message}</p>
+            <button
+              type="button"
+              className="toast-close"
+              onClick={() => dismiss(item.id)}
+              aria-label="Fermer la notification"
+            >
+              ×
+            </button>
+          </div>
+        ))}
+      </div>
+    </ToastContext.Provider>
+  );
+}
+
+export function useToast() {
+  const context = useContext(ToastContext);
+  if (!context) {
+    throw new Error("useToast doit être utilisé à l'intérieur d'un <ToastProvider>");
+  }
+  return context;
+}
+
+// ==== ./src/format.js (40 lignes) ====
+const ROOM_TYPE_LABELS = {
+  simple: 'Simple',
+  double: 'Double',
+  suite: 'Suite',
+  dortoir: 'Dortoir',
+};
+
+const STATUS_LABELS = {
+  en_attente: 'En attente',
+  confirmee: 'Confirmée',
+  annulee: 'Annulée',
+};
+
+const MONTH_LABELS = [
+  'Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin',
+  'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre',
+];
+
+export function formatAmount(amount) {
+  return `${new Intl.NumberFormat('fr-FR').format(amount)} Ar`;
+}
+
+export function formatDate(isoString) {
+  const date = new Date(isoString);
+  return new Intl.DateTimeFormat('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' }).format(date);
+}
+
+export function roomTypeLabel(roomType) {
+  return ROOM_TYPE_LABELS[roomType] ?? roomType;
+}
+
+export function statusLabel(status) {
+  return STATUS_LABELS[status] ?? status;
+}
+
+export function monthLabel(monthNumber) {
+  return MONTH_LABELS[monthNumber - 1] ?? String(monthNumber);
+}
+
+export { ROOM_TYPE_LABELS, STATUS_LABELS };
+
+// ==== ./src/main.jsx (14 lignes) ====
+import { StrictMode } from 'react';
+import { createRoot } from 'react-dom/client';
+import App from './App.jsx';
+import { ToastProvider } from './components/ToastProvider.jsx';
+import './styles/tokens.css';
+import './styles/global.css';
+
+createRoot(document.getElementById('root')).render(
+  <StrictMode>
+    <ToastProvider>
+      <App />
+    </ToastProvider>
+  </StrictMode>
+);
+
+// ==== ./src/styles/global.css (538 lignes) ====
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Layout shell ---------------------------------------------------------
+   Toute la largeur de l'écran : plus de conteneur à largeur fixe centré.
+   Le padding latéral est fluide (clamp) pour rester confortable aussi bien
+   sur mobile que sur un très grand écran, sans jamais laisser de bandes
+   vides artificielles. */
+
+.app {
+  width: 100%;
+  padding-block: var(--space-7) var(--space-8);
+  padding-inline: clamp(var(--space-4), 4vw, var(--space-8));
+}
+
+.app-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-6);
+  padding-bottom: var(--space-5);
+  border-bottom: 1px solid var(--border);
+}
+
+.app-title {
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: 28px;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+
+.app-subtitle {
+  color: var(--ink-soft);
+  font-size: 13px;
+  margin-top: var(--space-1);
+}
+
+/* Stats ----------------------------------------------------------------- */
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  margin-bottom: var(--space-6);
+}
+
+.stat-card {
+  background: var(--surface);
+  padding: var(--space-5);
+}
+
+.stat-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-soft);
+  margin: 0 0 var(--space-3);
+}
+
+.stat-value {
+  font-family: var(--font-mono);
+  font-size: 24px;
+  font-variant-numeric: tabular-nums;
+  margin: 0;
+}
+
+.stat-meta {
+  font-size: 12px;
+  color: var(--ink-faint);
+  margin-top: var(--space-2);
+}
+
+/* Toolbar ---------------------------------------------------------------- */
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.search-input {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface);
+  width: 220px;
+  max-width: 100%;
+}
+
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.tab {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  padding: var(--space-2) var(--space-3);
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.tab:hover {
+  color: var(--ink);
+}
+
+.tab[data-active='true'] {
+  background: var(--accent-tint);
+  color: var(--accent-strong);
+  border-color: var(--accent-tint);
+}
+
+.btn {
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: var(--space-2) var(--space-4);
+  cursor: pointer;
+  border-left-width: 1px;
+  transition: border-left-width 120ms ease;
+}
+
+.btn:hover {
+  border-left: 2px solid var(--accent);
+}
+
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--surface);
+}
+
+.btn-primary:hover {
+  background: var(--accent-strong);
+  border-left-width: 1px;
+}
+
+.btn-danger-text {
+  background: none;
+  border: none;
+  color: var(--ink-faint);
+  cursor: pointer;
+  padding: var(--space-1) var(--space-2);
+  margin-right: var(--space-1);
+}
+
+.btn-danger-text:hover {
+  color: var(--danger);
+}
+
+/* Table --------------------------------------------------------------
+   Sur grand écran : tableau classique en pleine largeur du conteneur.
+   Sous 720px : chaque ligne devient une carte, chaque cellule affiche son
+   libellé (via data-label) — plus de colonnes qui débordent ou de texte
+   tassé sur mobile. */
+
+.table-wrap {
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+thead th {
+  text-align: left;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+  font-weight: 500;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+
+tbody td {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+tbody tr:last-child td {
+  border-bottom: none;
+}
+
+tbody tr {
+  border-left: 2px solid transparent;
+}
+
+tbody tr:hover {
+  background: #fafaf9;
+  border-left-color: var(--accent);
+}
+
+.cell-amount {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.cell-dates {
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+.cell-actions {
+  white-space: nowrap;
+  text-align: right;
+}
+
+.status-select {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: var(--space-1) var(--space-2);
+  background: var(--surface);
+}
+
+.status-select[data-status='confirmee'] {
+  color: var(--accent-strong);
+}
+
+.status-select[data-status='annulee'] {
+  color: var(--danger);
+}
+
+.empty-state {
+  padding: var(--space-8) var(--space-5);
+  text-align: center;
+  color: var(--ink-soft);
+}
+
+.empty-state-title {
+  font-family: var(--font-display);
+  font-size: 18px;
+  color: var(--ink);
+  margin: 0 0 var(--space-2);
+}
+
+.error-banner {
+  border: 1px solid var(--danger);
+  background: var(--danger-tint);
+  color: var(--danger);
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-4);
+  font-size: 13px;
+}
+
+/* Form / modal ------------------------------------------------------- */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(28, 27, 25, 0.4);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: var(--space-7) var(--space-4);
+  overflow-y: auto;
+}
+
+.modal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  width: 100%;
+  max-width: 480px;
+  padding: var(--space-6);
+}
+
+.modal-title {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 500;
+  margin: 0 0 var(--space-5);
+}
+
+.field {
+  margin-bottom: var(--space-4);
+}
+
+.field label {
+  display: block;
+  font-size: 12px;
+  color: var(--ink-soft);
+  margin-bottom: var(--space-1);
+}
+
+.field input,
+.field select,
+.field textarea {
+  width: 100%;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface);
+}
+
+.field-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+}
+
+.field-error {
+  color: var(--danger);
+  font-size: 12px;
+  margin-top: var(--space-1);
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  margin-top: var(--space-6);
+}
+
+/* Toasts ---------------------------------------------------------------
+   Empilés en bas à droite sur desktop, pleine largeur en bas sur mobile
+   pour rester atteignables au pouce et ne jamais recouvrir le contenu
+   principal. */
+
+.toast-viewport {
+  position: fixed;
+  z-index: 1000;
+  bottom: var(--space-5);
+  right: var(--space-5);
+  left: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: min(360px, calc(100vw - var(--space-6)));
+  pointer-events: none;
+}
+
+.toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-left: 3px solid var(--ink-soft);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+  padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4);
+  animation: toast-in 180ms ease;
+}
+
+.toast[data-variant='success'] {
+  border-left-color: var(--success);
+}
+
+.toast[data-variant='error'] {
+  border-left-color: var(--danger);
+}
+
+.toast-message {
+  margin: 0;
+  font-size: 13px;
+  flex: 1;
+}
+
+.toast-close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--ink-faint);
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 var(--space-1);
+}
+
+.toast-close:hover {
+  color: var(--ink);
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast {
+    animation: none;
+  }
+}
+
+/* Responsive ----------------------------------------------------------- */
+
+@media (max-width: 720px) {
+  .app {
+    padding-inline: var(--space-4);
+    padding-block: var(--space-5) var(--space-6);
+  }
+
+  .app-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .app-header .btn-primary {
+    width: 100%;
+  }
+
+  .toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .search-input {
+    width: 100%;
+  }
+
+  .toast-viewport {
+    left: var(--space-3);
+    right: var(--space-3);
+    bottom: var(--space-3);
+    width: auto;
+  }
+
+  /* Le tableau devient une pile de cartes : une ligne = une carte, chaque
+     cellule affiche son libellé grâce à data-label plutôt que de dépendre
+     d'un en-tête de colonne devenu illisible en dessous de 720px. */
+  .table-wrap table,
+  .table-wrap thead,
+  .table-wrap tbody,
+  .table-wrap tr,
+  .table-wrap th,
+  .table-wrap td {
+    display: block;
+  }
+
+  .table-wrap thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+    padding: 0;
+    margin: -1px;
+  }
+
+  .table-wrap tbody tr {
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .table-wrap tbody tr:hover {
+    border-left-color: transparent;
+  }
+
+  .table-wrap td {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    padding: var(--space-2) 0;
+    border-bottom: none;
+    text-align: right;
+  }
+
+  .table-wrap td::before {
+    content: attr(data-label);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--ink-soft);
+    text-align: left;
+    flex-shrink: 0;
+  }
+
+  .cell-actions {
+    justify-content: flex-end;
+    text-align: right;
+  }
+
+  .cell-actions::before {
+    content: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .stats {
+    grid-template-columns: 1fr;
+  }
+  .field-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+// ==== ./src/styles/tokens.css (51 lignes) ====
+:root {
+  --bg: #f4f2ee;
+  --surface: #ffffff;
+  --border: #e6e2d9;
+  --border-strong: #d2ccbf;
+
+  --ink: #201e1a;
+  --ink-soft: #736c60;
+  --ink-faint: #a89f8f;
+
+  --accent: #2f4538;
+  --accent-strong: #1f2f26;
+  --accent-tint: #e6ede6;
+
+  --status-confirmee: #2f6b45;
+  --status-confirmee-bg: #e3f0e5;
+  --status-attente: #a3701f;
+  --status-attente-bg: #faefd9;
+  --status-annulee: #a34430;
+  --status-annulee-bg: #f7e6e0;
+
+  /* Alias sémantiques : utilisés par les bannières d'erreur, les toasts et
+     l'état "annulée" du select de statut. Ils n'étaient pas définis alors
+     qu'ils étaient déjà référencés dans global.css. */
+  --danger: var(--status-annulee);
+  --danger-tint: var(--status-annulee-bg);
+  --success: var(--status-confirmee);
+  --success-tint: var(--status-confirmee-bg);
+  --warning: var(--status-attente);
+  --warning-tint: var(--status-attente-bg);
+
+  --font-display: 'Fraunces', Georgia, serif;
+  --font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'IBM Plex Mono', 'SFMono-Regular', monospace;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+
+  --radius: 8px;
+  --radius-lg: 12px;
+  --radius-pill: 999px;
+
+  --shadow-card: 0 1px 2px rgba(32, 30, 26, 0.04), 0 8px 24px -16px rgba(32, 30, 26, 0.12);
+  --shadow-modal: 0 24px 64px -24px rgba(32, 30, 26, 0.35);
+}
+
+// ==== ./vite.config.js (9 lignes) ====
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    port: 5173,
+  },
+});
+

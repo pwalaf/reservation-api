@@ -19,6 +19,16 @@
   --status-annulee: #a34430;
   --status-annulee-bg: #f7e6e0;
 
+  /* Alias sémantiques : utilisés par les bannières d'erreur, les toasts et
+     l'état "annulée" du select de statut. Ils n'étaient pas définis alors
+     qu'ils étaient déjà référencés dans global.css. */
+  --danger: var(--status-annulee);
+  --danger-tint: var(--status-annulee-bg);
+  --success: var(--status-confirmee);
+  --success-tint: var(--status-confirmee-bg);
+  --warning: var(--status-attente);
+  --warning-tint: var(--status-attente-bg);
+
   --font-display: 'Fraunces', Georgia, serif;
   --font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   --font-mono: 'IBM Plex Mono', 'SFMono-Regular', monospace;

@@ -22,23 +22,24 @@ export default function ReservationsTable({ reservations, onStatusChange, onEdit
             <th>Séjour</th>
             <th>Statut</th>
             <th className="cell-amount">Montant</th>
-            <th />
+            <th>Actions</th>
           </tr>
         </thead>
         <tbody>
           {reservations.map((reservation) => (
             <tr key={reservation._id}>
-              <td>{reservation.clientName}</td>
-              <td>{roomTypeLabel(reservation.roomType)}</td>
-              <td className="cell-dates">
+              <td data-label="Client">{reservation.clientName}</td>
+              <td data-label="Chambre">{roomTypeLabel(reservation.roomType)}</td>
+              <td data-label="Séjour" className="cell-dates">
                 {formatDate(reservation.checkIn)} — {formatDate(reservation.checkOut)}
               </td>
-              <td>
+              <td data-label="Statut">
                 <select
                   className="status-select"
                   data-status={reservation.status}
                   value={reservation.status}
                   onChange={(event) => onStatusChange(reservation._id, event.target.value)}
+                  aria-label={`Statut de la réservation de ${reservation.clientName}`}
                 >
                   {Object.entries(STATUS_LABELS).map(([value, label]) => (
                     <option key={value} value={value}>
@@ -47,8 +48,10 @@ export default function ReservationsTable({ reservations, onStatusChange, onEdit
                   ))}
                 </select>
               </td>
-              <td className="cell-amount">{formatAmount(reservation.amount)}</td>
-              <td>
+              <td data-label="Montant" className="cell-amount">
+                {formatAmount(reservation.amount)}
+              </td>
+              <td data-label="Actions" className="cell-actions">
                 <button type="button" className="btn-danger-text" onClick={() => onEdit(reservation)}>
                   Modifier
                 </button>

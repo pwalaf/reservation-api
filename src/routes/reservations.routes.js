@@ -1,10 +1,11 @@
 const { Router } = require('express');
 const controller = require('../controllers/reservations.controller');
-const { stats } = require('../controllers/reservations.stats');
 
 const router = Router();
 
-router.get('/stats', stats);
+router.get('/stats', controller.stats);
+router.get('/export', controller.exportReservations);
+
 router.get('/', controller.list);
 router.get('/:id', controller.getById);
 router.post('/', controller.create);

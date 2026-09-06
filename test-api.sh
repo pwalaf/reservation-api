@@ -57,7 +57,7 @@ curl -s -w '\n[HTTP %{http_code}]\n' -X POST "$API" -H "Content-Type: applicatio
   "amount": 50000
 }'
 
-separator "Liste complète"
+separator "Liste — forme paginée (doit avoir data + meta)"
 curl -s -w '\n[HTTP %{http_code}]\n' "$API"
 
 separator "Liste filtrée — status=confirmee"
@@ -65,6 +65,32 @@ curl -s -w '\n[HTTP %{http_code}]\n' "$API?status=confirmee"
 
 separator "Liste filtrée — roomType=suite"
 curl -s -w '\n[HTTP %{http_code}]\n' "$API?roomType=suite"
+
+separator "Liste filtrée — recherche par nom (search=Test)"
+curl -s -w '\n[HTTP %{http_code}]\n' "$API?search=Test"
+
+separator "Liste filtrée — plage de dates d'arrivée"
+curl -s -w '\n[HTTP %{http_code}]\n' "$API?checkInFrom=2026-10-01&checkInTo=2026-10-31"
+
+separator "Liste triée — montant décroissant (sort=-amount)"
+curl -s -w '\n[HTTP %{http_code}]\n' "$API?sort=-amount"
+
+separator "Liste — champ de tri invalide (doit retomber sur le tri par défaut, pas d'erreur)"
+curl -s -w '\n[HTTP %{http_code}]\n' "$API?sort=motDePasse"
+
+separator "Pagination — page 1, limit 2"
+curl -s -w '\n[HTTP %{http_code}]\n' "$API?page=1&limit=2"
+
+separator "Export CSV — enregistré dans /tmp/export-test.csv"
+curl -s -o /tmp/export-test.csv -w '[HTTP %{http_code}] -> /tmp/export-test.csv (%{size_download} octets)\n' "$API/export?format=csv"
+head -c 200 /tmp/export-test.csv; echo
+
+separator "Export PDF — enregistré dans /tmp/export-test.pdf"
+curl -s -o /tmp/export-test.pdf -w '[HTTP %{http_code}] -> /tmp/export-test.pdf (%{size_download} octets)\n' "$API/export?format=pdf"
+file /tmp/export-test.pdf 2>/dev/null || echo "(commande 'file' indisponible, vérifie la taille ci-dessus)"
+
+separator "Export — format invalide (doit être 400)"
+curl -s -w '\n[HTTP %{http_code}]\n' "$API/export?format=xls"
 
 separator "Détail par id"
 curl -s -w '\n[HTTP %{http_code}]\n' "$API/$ID"
@@ -89,3 +115,4 @@ curl -s -w '\n[HTTP %{http_code}]\n' "$API/$ID"
 
 separator "Terminé"
 echo "Vérifie ci-dessus : les codes 400/404 attendus sont bien ceux marqués comme tels dans les titres."
+echo "Vérifie aussi /tmp/export-test.csv et /tmp/export-test.pdf à l'œil pour un contrôle visuel rapide."

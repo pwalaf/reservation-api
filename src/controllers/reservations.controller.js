@@ -2,19 +2,36 @@ const { Reservation } = require('../models/Reservation');
 const {
   createReservationSchema,
   updateReservationSchema,
-  listQuerySchema,
 } = require('../validators/reservation.validator');
+const {
+  buildReservationFilter,
+  buildReservationSort,
+  buildPagination,
+} = require('../utils/reservationQuery');
+const { reservationsToCsv } = require('../utils/csv');
+const { reservationsToPdf } = require('../utils/pdf');
 const { asyncHandler } = require('../middleware/asyncHandler');
 const { ApiError } = require('../middleware/errorHandler');
 
 const list = asyncHandler(async (req, res) => {
-  const { status, roomType } = listQuerySchema.parse(req.query);
-  const filter = {};
-  if (status) filter.status = status;
-  if (roomType) filter.roomType = roomType;
+  const filter = buildReservationFilter(req.query);
+  const sort = buildReservationSort(req.query.sort);
+  const { page, limit, skip } = buildPagination(req.query);
 
-  const reservations = await Reservation.find(filter).sort({ checkIn: 1 });
-  res.json(reservations);
+  const [data, total] = await Promise.all([
+    Reservation.find(filter).sort(sort).skip(skip).limit(limit),
+    Reservation.countDocuments(filter),
+  ]);
+
+  res.json({
+    data,
+    meta: {
+      page,
+      limit,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / limit)),
+    },
+  });
 });
 
 const getById = asyncHandler(async (req, res) => {
@@ -53,4 +70,92 @@ const remove = asyncHandler(async (req, res) => {
   res.status(204).send();
 });
 
-module.exports = { list, getById, create, update, remove };
+const stats = asyncHandler(async (req, res) => {
+  const [result] = await Reservation.aggregate([
+    {
+      $facet: {
+        revenuParMois: [
+          { $match: { status: 'confirmee' } },
+          {
+            $group: {
+              _id: { annee: { $year: '$checkIn' }, mois: { $month: '$checkIn' } },
+              revenu: { $sum: '$amount' },
+              nombreReservations: { $sum: 1 },
+            },
+          },
+          { $sort: { '_id.annee': 1, '_id.mois': 1 } },
+        ],
+        occupationParTypeChambre: [
+          { $match: { status: { $in: ['confirmee', 'en_attente'] } } },
+          {
+            $group: {
+              _id: '$roomType',
+              nombreReservations: { $sum: 1 },
+              revenuTotal: { $sum: '$amount' },
+            },
+          },
+          { $sort: { nombreReservations: -1 } },
+        ],
+        delaiMoyenConfirmationHeures: [
+          { $match: { status: 'confirmee' } },
+          { $unwind: '$statusHistory' },
+          {
+            $group: {
+              _id: '$_id',
+              creation: { $min: '$statusHistory.changedAt' },
+              confirmation: {
+                $min: {
+                  $cond: [{ $eq: ['$statusHistory.status', 'confirmee'] }, '$statusHistory.changedAt', null],
+                },
+              },
+            },
+          },
+          { $match: { confirmation: { $ne: null } } },
+          {
+            $project: {
+              heures: { $divide: [{ $subtract: ['$confirmation', '$creation'] }, 1000 * 60 * 60] },
+            },
+          },
+          { $group: { _id: null, moyenne: { $avg: '$heures' } } },
+        ],
+      },
+    },
+  ]);
+
+  res.json({
+    revenuParMois: result.revenuParMois,
+    occupationParTypeChambre: result.occupationParTypeChambre,
+    chambrePlusDemandee: result.occupationParTypeChambre[0]?._id ?? null,
+    delaiMoyenConfirmationHeures: result.delaiMoyenConfirmationHeures[0]?.moyenne ?? null,
+  });
+});
+
+const EXPORT_LIMIT = 1000;
+
+const exportReservations = asyncHandler(async (req, res) => {
+  const format = String(req.query.format ?? 'csv').toLowerCase();
+  if (!['csv', 'pdf'].includes(format)) {
+    throw new ApiError(400, 'format_export_invalide');
+  }
+
+  const filter = buildReservationFilter(req.query);
+  const sort = buildReservationSort(req.query.sort);
+  const reservations = await Reservation.find(filter).sort(sort).limit(EXPORT_LIMIT);
+
+  const timestamp = new Date().toISOString().slice(0, 10);
+
+  if (format === 'csv') {
+    const csv = reservationsToCsv(reservations);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="reservations-${timestamp}.csv"`);
+    res.send(csv);
+    return;
+  }
+
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="reservations-${timestamp}.pdf"`);
+  const doc = reservationsToPdf(reservations, { title: 'Réservations' });
+  doc.pipe(res);
+});
+
+module.exports = { list, getById, create, update, remove, stats, exportReservations };

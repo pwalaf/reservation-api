@@ -7,13 +7,23 @@ const { errorHandler } = require('./middleware/errorHandler');
 
 const app = express();
 
-app.use(cors());
+const allowedOrigins = (process.env.CORS_ORIGIN ?? '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+app.use(
+  cors(
+    allowedOrigins.length > 0
+      ? { origin: allowedOrigins }
+      : undefined
+  )
+);
 app.use(express.json());
 
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
 app.use('/api/reservations', reservationsRouter);
 
-// 404 explicite plutôt qu'un HTML par défaut d'Express — plus propre pour une API.
 app.use((req, res) => res.status(404).json({ error: 'route_introuvable' }));
 
 app.use(errorHandler);
