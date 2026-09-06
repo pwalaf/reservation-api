@@ -1,9 +1,19 @@
 const { z } = require('zod');
 const { ROOM_TYPES, STATUSES } = require('../models/Reservation');
 
+const PHONE_REGEX = /^(0\d{9}|\+\d{7,15})$/;
+
+const phoneSchema = z
+  .string()
+  .transform((value) => value.replace(/[\s.-]/g, ''))
+  .refine((value) => value.length === 0 || PHONE_REGEX.test(value), {
+    message: 'Numéro invalide (format local : 0XX XX XXX XX, ou international : +XX...)',
+  })
+  .optional();
+
 const baseReservationSchema = z.object({
   clientName: z.string().min(2, 'Le nom du client est trop court'),
-  clientPhone: z.string().optional(),
+  clientPhone: phoneSchema,
   roomType: z.enum(ROOM_TYPES),
   checkIn: z.coerce.date(),
   checkOut: z.coerce.date(),
@@ -25,4 +35,9 @@ const checkOutAfterCheckIn = (data, ctx) => {
 const createReservationSchema = baseReservationSchema.superRefine(checkOutAfterCheckIn);
 const updateReservationSchema = baseReservationSchema.partial().superRefine(checkOutAfterCheckIn);
 
-module.exports = { createReservationSchema, updateReservationSchema };
+const listQuerySchema = z.object({
+  status: z.enum(STATUSES).optional(),
+  roomType: z.enum(ROOM_TYPES).optional(),
+});
+
+module.exports = { createReservationSchema, updateReservationSchema, listQuerySchema };
