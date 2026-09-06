@@ -340,24 +340,80 @@ tbody tr:hover {
 }
 
 .cell-actions {
-  white-space: nowrap;
   text-align: right;
+  white-space: nowrap;
 }
 
-.status-select {
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  padding: var(--space-1) var(--space-2);
+.actions-buttons {
+  display: inline-flex;
+  gap: var(--space-2);
+}
+.btn-text {
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius); /* Réutilise l'arrondi global de l'app */
+  border: 1px solid var(--border); /* Bordure très fine et discrète */
   background: var(--surface);
+  color: var(--ink-soft);
+  cursor: pointer;
+  transition: all 150ms ease;
 }
 
-.status-select[data-status='confirmee'] {
-  color: var(--accent-strong);
+/* Au survol du bouton classique (Modifier) */
+.btn-text:hover {
+  background: #fcfbfb;
+  border-color: var(--border-strong);
+  color: var(--ink);
 }
 
-.status-select[data-status='annulee'] {
-  color: var(--danger);
+/* Version Danger adoucie (Supprimer) */
+.btn-text.danger {
+  border-color: #fee2e2;
+  background-color: #fff8f8; /* Fond rouge à peine teinté */
+  color: #ef4444; /* Rouge moderne */
 }
+
+/* Au survol du bouton Supprimer */
+.btn-text.danger:hover {
+  background-color: #fee2e2;
+  border-color: #fca5a5;
+  color: #b91c1c;
+}
+
+.status-pill {
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-pill, 9999px); /* Forme de pilule */
+  border: none; /* Suppression de la bordure brute */
+  cursor: pointer;
+  outline: none;
+  transition: background-color 150ms ease, filter 150ms ease;
+}
+
+.status-pill:hover {
+  filter: brightness(0.96); /* Léger assombrissement au survol */
+}
+
+/* Couleurs adoucies (Pastels professionnels) */
+.status-pill[data-status='en_attente'] {
+  background-color: #fef3c7; /* Jaune ambré très doux */
+  color: #92400e;
+}
+
+.status-pill[data-status='confirmee'] {
+  background-color: #dcfce7; /* Vert émeraude très doux */
+  color: #166534;
+}
+
+.status-pill[data-status='annulee'] {
+  background-color: #fee2e2; /* Rouge rose très doux */
+  color: #991b1b;
+}
+
 
 .empty-state {
   padding: var(--space-8) var(--space-5);

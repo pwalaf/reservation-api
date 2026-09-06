@@ -2,11 +2,11 @@ const PDFDocument = require('pdfkit');
 const { formatAmount, formatDate, roomTypeLabel, statusLabel } = require('./format');
 
 const COLUMNS = [
-  { label: 'Client', width: 120, get: (r) => r.clientName },
-  { label: 'Chambre', width: 70, get: (r) => roomTypeLabel(r.roomType) },
-  { label: 'Séjour', width: 130, get: (r) => `${formatDate(r.checkIn)} - ${formatDate(r.checkOut)}` },
-  { label: 'Statut', width: 80, get: (r) => statusLabel(r.status) },
-  { label: 'Montant', width: 90, get: (r) => formatAmount(r.amount) },
+  { label: 'Client', width: 120, align: 'left', get: (r) => r.clientName },
+  { label: 'Chambre', width: 70, align: 'left', get: (r) => roomTypeLabel(r.roomType) },
+  { label: 'Séjour', width: 130, align: 'left', get: (r) => `${formatDate(r.checkIn)} - ${formatDate(r.checkOut)}` },
+  { label: 'Statut', width: 80, align: 'left', get: (r) => statusLabel(r.status) },
+  { label: 'Montant', width: 90, align: 'right', get: (r) => formatAmount(r.amount) }, 
 ];
 
 const ROW_HEIGHT = 20;
@@ -37,9 +37,16 @@ function reservationsToPdf(reservations, { title = 'Réservations' } = {}) {
     ensureSpace();
     doc.font(bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(9);
     let x = startX;
+    
     values.forEach((value, index) => {
-      doc.text(String(value), x, y, { width: COLUMNS[index].width, ellipsis: true });
-      x += COLUMNS[index].width;
+      const column = COLUMNS[index];
+      
+      doc.text(String(value), x, y, { 
+        width: column.width, 
+        ellipsis: true,
+        align: column.align 
+      });
+      x += column.width;
     });
     y += ROW_HEIGHT;
   }

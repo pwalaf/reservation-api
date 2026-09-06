@@ -2,8 +2,12 @@ const ROOM_TYPE_LABELS = { simple: 'Simple', double: 'Double', suite: 'Suite', d
 const STATUS_LABELS = { en_attente: 'En attente', confirmee: 'Confirmée', annulee: 'Annulée' };
 
 function formatAmount(amount) {
-  return `${new Intl.NumberFormat('fr-FR').format(amount)} Ar`;
+  const formatted = new Intl.NumberFormat('fr-FR').format(amount);
+  const cleanSpace = formatted.replace(/\s/g, ' ');
+  
+  return `${cleanSpace} Ar`;
 }
+
 
 function formatDate(value) {
   return new Intl.DateTimeFormat('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' }).format(

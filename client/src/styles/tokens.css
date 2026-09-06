@@ -19,9 +19,6 @@
   --status-annulee: #a34430;
   --status-annulee-bg: #f7e6e0;
 
-  /* Alias sémantiques : utilisés par les bannières d'erreur, les toasts et
-     l'état "annulée" du select de statut. Ils n'étaient pas définis alors
-     qu'ils étaient déjà référencés dans global.css. */
   --danger: var(--status-annulee);
   --danger-tint: var(--status-annulee-bg);
   --success: var(--status-confirmee);
@@ -43,7 +40,7 @@
   --space-8: 64px;
 
   --radius: 8px;
-  --radius-lg: 12px;
+  --radius-lg: 10px;
   --radius-pill: 999px;
 
   --shadow-card: 0 1px 2px rgba(32, 30, 26, 0.04), 0 8px 24px -16px rgba(32, 30, 26, 0.12);

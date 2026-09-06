@@ -22,7 +22,7 @@ export default function ReservationsTable({ reservations, onStatusChange, onEdit
             <th>Séjour</th>
             <th>Statut</th>
             <th className="cell-amount">Montant</th>
-            <th>Actions</th>
+            <th className="cell-actions">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -35,11 +35,10 @@ export default function ReservationsTable({ reservations, onStatusChange, onEdit
               </td>
               <td data-label="Statut">
                 <select
-                  className="status-select"
+                  className="status-pill"
                   data-status={reservation.status}
                   value={reservation.status}
                   onChange={(event) => onStatusChange(reservation._id, event.target.value)}
-                  aria-label={`Statut de la réservation de ${reservation.clientName}`}
                 >
                   {Object.entries(STATUS_LABELS).map(([value, label]) => (
                     <option key={value} value={value}>
@@ -51,19 +50,21 @@ export default function ReservationsTable({ reservations, onStatusChange, onEdit
               <td data-label="Montant" className="cell-amount">
                 {formatAmount(reservation.amount)}
               </td>
-              <td data-label="Actions" className="cell-actions">
-                <button type="button" className="btn-danger-text" onClick={() => onEdit(reservation)}>
-                  Modifier
-                </button>
-                <button
-                  type="button"
-                  className="btn-danger-text"
-                  onClick={() => onDelete(reservation._id)}
-                  aria-label={`Supprimer la réservation de ${reservation.clientName}`}
-                >
-                  Supprimer
-                </button>
-              </td>
+                <td data-label="" className="cell-actions">
+                  <span className="actions-buttons">
+                    <button type="button" className="btn-text" onClick={() => onEdit(reservation)}>
+                      Modifier
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-text danger"
+                      onClick={() => onDelete(reservation._id)}
+                      aria-label={`Supprimer la réservation de ${reservation.clientName}`}
+                    >
+                      Supprimer
+                    </button>
+                  </span>
+                </td>
             </tr>
           ))}
         </tbody>
