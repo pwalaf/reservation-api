@@ -22,6 +22,7 @@ app.use(
 app.use(express.json());
 
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
+app.get('/ping', (req, res) => res.status(200).send('pong'));
 app.use('/api/reservations', reservationsRouter);
 
 app.use((req, res) => res.status(404).json({ error: 'route_introuvable' }));
